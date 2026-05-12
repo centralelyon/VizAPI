@@ -1,0 +1,96 @@
+{
+    "city": "CameraUnique",
+    "cup": "TEST",
+    "distance": "50",
+    "epreuve": "finale",
+    "flash": {
+        "pts": [
+            [
+                507,
+                252
+            ],
+            [
+                487,
+                252
+            ],
+            [
+                487,
+                276
+            ],
+            [
+                507,
+                276
+            ]
+        ],
+        "side": "right"
+    },
+    "lignes": {
+        "ligne1": "Ligne 1",
+        "ligne2": "Ligne 2",
+        "ligne3": "Ligne 3",
+        "ligne4": "Ligne 4",
+        "ligne5": "Ligne 5",
+        "ligne6": "Ligne 6",
+        "ligne7": "Ligne 7",
+        "ligne8": "Ligne 8"
+    },
+    "nage": "freestyle",
+    "name": "nageurs_simple",
+    "ncamera": 1,
+    "one_is_up": "False",
+    "sexe": "hommes",
+    "start_side": "left",
+    "taille_piscine": [
+        50,
+        20
+    ],
+    "videos": [
+        {
+            "destPts": [
+                [
+                    0,
+                    361
+                ],
+                [
+                    900,
+                    361
+                ],
+                [
+                    900,
+                    0
+                ],
+                [
+                    0,
+                    0
+                ]
+            ],
+            "fps": 50.0,
+            "height": 1080,
+            "name": "nageurs_simple.mp4",
+            "one_is_up": "False",
+            "srcPts": [
+                [
+                    480,
+                    990
+                ],
+                [
+                    1440,
+                    990
+                ],
+                [
+                    1440,
+                    190
+                ],
+                [
+                    480,
+                    190
+                ]
+            ],
+            "start_flash": 0.1,
+            "start_moment": 0.1,
+            "start_side": "left",
+            "width": 1920
+        }
+    ],
+    "year": "2025"
+}
