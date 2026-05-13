@@ -6,7 +6,7 @@ all_modules: list[CoreModule | Module] = []
 core_modules: list[CoreModule] = []
 module_list: list[Module] = []
 
-for endpoint_files in Path().glob("app/modules/*/api/api.py"):
+for endpoint_files in Path().glob("app/modules/*/api_*.py"):
     endpoint_module = importlib.import_module(
         ".".join(endpoint_files.with_suffix("").parts),
     )
@@ -17,7 +17,7 @@ for endpoint_files in Path().glob("app/modules/*/api/api.py"):
     else:
         print(f"Module in {endpoint_files} does not declare a 'module', skipping.")
 
-for endpoint_files in Path().glob("app/core/*/api/api.py"):
+for endpoint_files in Path().glob("app/core/*/api_*.py"):
     endpoint_module = importlib.import_module(
         ".".join(endpoint_files.with_suffix("").parts),
     )

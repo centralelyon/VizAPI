@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-import app.core.users.models  # noqa: F401 — registers User on Base.metadata
 from app.module import all_modules
 from app.shared.db.session import Base, engine
 
