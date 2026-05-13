@@ -16,10 +16,12 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str
     GITHUB_REDIRECT_URI: str
     GITHUB_SCOPES: str
+
     SECRET_KEY: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
+    DATA_PATH_MODULES: str = "./data/modules/"
 
 
 def construct_settings() -> Settings:

@@ -9,7 +9,7 @@ from app.core.auth.services_auth import (
 from app.core.security.jwt import create_token
 from app.core.auth import schemas_auth
 
-from app.shared.db.session import get_db
+from app.shared.db.database import get_db
 from app.types.module import CoreModule
 
 root = "auth"

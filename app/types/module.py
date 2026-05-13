@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from starlette.routing import Mount
 # from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -19,6 +20,7 @@ class CoreModule:
         """
         self.root = root
         self.router = router or APIRouter(tags=[tag])
+        self.mounts: list[tuple[str, object, str]] = []
         # self.permissions = permissions
 
 
@@ -45,4 +47,5 @@ class Module(CoreModule):
         # self.default_allowed_groups_ids = default_allowed_groups_ids
         # self.default_allowed_account_types = default_allowed_account_types
         self.router = router or APIRouter(tags=[tag])
+        self.mounts: list[tuple[str, object, str]] = []
         # self.permissions = permissions

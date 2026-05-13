@@ -1,9 +1,8 @@
 import os
-import dotenv
-
 import logging
 from app.modules.aquanote import services_aquanote as aquanote_service
 from app.types.module import Module
+from app.core.config import construct_settings
 from fastapi.staticfiles import StaticFiles
 
 root = "aquanote"
@@ -14,19 +13,17 @@ module = Module(
 
 aquanote_logger = logging.getLogger("aquanote")
 
-
-# Mount the static directory
-dotenv.load_dotenv()
-static_dir = os.path.join(
+_settings = construct_settings()
+_static_dir = os.path.join(
     os.path.dirname(__file__),
     "..",
     "..",
     "..",
-    os.getenv("DATA_PATH_MODULES", ""),
+    _settings.DATA_PATH_MODULES,
     root,
     "courses_demo",
 )
-module.router.mount("/files", StaticFiles(directory=static_dir), name="courses_demo")
+module.mounts.append(("/files", StaticFiles(directory=_static_dir), "courses_demo"))
 
 
 @module.router.get(

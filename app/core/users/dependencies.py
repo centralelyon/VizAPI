@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security.jwt import verify_token
 from app.core.users import models_users, repositories_users
-from app.shared.db.session import get_db
+from app.shared.db.database import get_db
 
 bearer_scheme = HTTPBearer()
 

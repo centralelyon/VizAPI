@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.module import all_modules
-from app.shared.db.session import Base, engine
+from app.shared.db.database import Base, engine
 
 
 @asynccontextmanager
@@ -31,3 +31,5 @@ app.add_middleware(
 
 for module in all_modules:
     app.include_router(module.router, prefix=f"/{module.root}")
+    for path, sub_app, name in getattr(module, "mounts", []):
+        app.mount(f"/{module.root}{path}", sub_app, name=name)

@@ -1,6 +1,8 @@
 from pathlib import Path
+from app.core.config import construct_settings
 
-BASE_DIR = Path("courses_demo")
+_settings = construct_settings()
+BASE_DIR = Path(_settings.DATA_PATH_MODULES) / "aquanote" / "courses_demo"
 
 
 def list_compets() -> list[dict[str, str]]:

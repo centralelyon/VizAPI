@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.template import schemas_template, service_template
-from app.shared.db.session import get_db
+from app.shared.db.database import get_db
 from app.types.module import Module
 
 root = "template"  # Set the root path for the module every routes will be prefixed with this
