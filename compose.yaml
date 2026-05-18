@@ -1,0 +1,11 @@
+services:
+  vizapi:
+    image: vizapi:latest
+    container_name: vizapi
+    hostname: vizapi
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./vizapi-data:/vizapi/data:z
