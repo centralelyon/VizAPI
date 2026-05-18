@@ -33,3 +33,39 @@ async def create(
     await db.commit()
     await db.refresh(db_item)
     return db_item
+
+
+async def create_file(
+    db: AsyncSession,
+    original_filename: str,
+    content_type: str,
+    size: int,
+) -> models_template.UploadedFile:
+    db_file = models_template.UploadedFile(
+        original_filename=original_filename,
+        content_type=content_type,
+        size=size,
+    )
+    db.add(db_file)
+    await db.commit()
+    await db.refresh(db_file)
+    return db_file
+
+
+async def get_file(
+    db: AsyncSession,
+    file_id: int,
+) -> models_template.UploadedFile | None:
+    result = await db.execute(
+        select(models_template.UploadedFile).where(
+            models_template.UploadedFile.id == file_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_all_files(
+    db: AsyncSession,
+) -> list[models_template.UploadedFile]:
+    result = await db.execute(select(models_template.UploadedFile))
+    return list(result.scalars().all())

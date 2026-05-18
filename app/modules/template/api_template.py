@@ -1,4 +1,5 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.template import schemas_template, service_template
@@ -63,3 +64,38 @@ async def db_get(item_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
         )
     return item
+
+
+# --- File upload/download routes ---
+
+
+@module.router.post(
+    "/files",
+    response_model=schemas_template.UploadedFileRead,
+    status_code=201,
+)
+async def upload_file(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service_template.upload_file(db, file)
+
+
+@module.router.get("/files", response_model=list[schemas_template.UploadedFileRead])
+async def list_files(db: AsyncSession = Depends(get_db)):
+    return await service_template.list_files(db)
+
+
+@module.router.get("/files/{file_id}")
+async def download_file(file_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        data, content_type, filename = await service_template.download_file(db, file_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
