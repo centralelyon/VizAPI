@@ -1,0 +1,83 @@
+site_name: VizAPI Documentation
+site_url: https://mydomain.org/mysite
+repo_url: https://github.com/centralelyon/VizAPI
+repo_name: centralelyon/VizAPI
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+    admonition:
+      tip: fontawesome/solid/wand-magic-sparkles
+      note: fontawesome/solid/circle-info
+      warning: fontawesome/solid/triangle-exclamation
+      danger: fontawesome/solid/skull
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+    - architecture/index.md
+    - Overview: architecture/overview.md
+    - Core Layer: architecture/core.md
+    - Shared Layer: architecture/shared.md
+    - Module System: architecture/modules.md
+  - Guides:
+    - guides/index.md
+    - Getting Started: guides/getting-started.md
+    - Add a New Module: guides/add-module.md
+    - Permissions: guides/permissions.md
+  - Modules:
+    - modules/index.md
+    - Video: modules/video.md
+    - Analytics: modules/analytics.md
