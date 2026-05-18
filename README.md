@@ -23,6 +23,26 @@ fastapi dev
 
 The API will be available at http://127.0.0.1:8000 and the OpenAPI docs at http://127.0.0.1:8000/docs.
 
+## Docker
+
+To build the Docker image:
+
+```bash
+docker build -t vizapi:latest .
+```
+
+To run the Docker container:
+
+```bash
+docker run -d -p 8000:8000 --name vizapi vizapi:latest --env-file .env
+```
+
+or using Docker Compose:
+
+```bash
+docker compose up -d
+```
+
 ## Modules
 
 Modules are discovered automatically from:
