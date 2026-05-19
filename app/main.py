@@ -1,10 +1,24 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.module import all_modules
+from app.core.utils.settings import construct_settings
 from app.shared.db.database import Base, engine
+
+
+def _ensure_module_data_dirs() -> None:
+    settings = construct_settings()
+    base_dir = Path(settings.DATA_PATH_MODULES)
+    required_dirs = [
+        base_dir / "aquanote" / "courses_demo",
+        base_dir / "descript_sketches" / "palettes",
+        base_dir / "template" / "files",
+    ]
+    for directory in required_dirs:
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -20,6 +34,9 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan,
 )
+
+
+_ensure_module_data_dirs()
 
 app.add_middleware(
     CORSMiddleware,
