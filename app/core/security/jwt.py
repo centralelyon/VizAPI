@@ -5,7 +5,7 @@ from joserfc.errors import BadSignatureError, ExpiredTokenError, JoseError
 from joserfc.jwk import OctKey
 from joserfc.jwt import JWTClaimsRegistry
 
-from app.shared.utils.settings import get_settings
+from app.core.utils.settings import get_settings
 
 ALGORITHM = "HS256"
 
