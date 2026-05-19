@@ -1,7 +1,9 @@
+from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile, File
 
+from app.core.config import construct_settings
 from app.types.module import Module
 from app.modules.descript_sketches import services_descript_sketches
 
@@ -11,6 +13,10 @@ module = Module(
     tag="Descript Sketches",
     # permissions=None,
 )
+
+_settings = construct_settings()
+_base_dir = Path(_settings.DATA_PATH_MODULES)
+module.add_data_dir_from(_base_dir, "descript_sketches", "palettes")
 
 
 @module.router.get(
@@ -44,6 +50,7 @@ async def get_palette(
 ):
     """Get a specific palette by name."""
     return services_descript_sketches.get_palette(name)
+
 
 @module.router.delete(
     "/palettes/{name}",

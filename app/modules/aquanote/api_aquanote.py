@@ -1,5 +1,6 @@
 import os
 import logging
+from pathlib import Path
 from app.modules.aquanote import services_aquanote as aquanote_service
 from app.types.module import Module
 from app.core.config import construct_settings
@@ -14,6 +15,7 @@ module = Module(
 aquanote_logger = logging.getLogger("aquanote")
 
 _settings = construct_settings()
+_base_dir = Path(_settings.DATA_PATH_MODULES)
 _static_dir = os.path.join(
     os.path.dirname(__file__),
     "..",
@@ -23,7 +25,10 @@ _static_dir = os.path.join(
     root,
     "courses_demo",
 )
-module.mounts.append(("/files", StaticFiles(directory=_static_dir), "courses_demo"))
+module.add_data_dir_from(_base_dir, root, "courses_demo")
+module.mounts.append(
+    ("/files", StaticFiles(directory=_static_dir, check_dir=False), "courses_demo")
+)
 
 
 @module.router.get(

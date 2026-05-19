@@ -1,7 +1,10 @@
+from pathlib import Path
+
 from fastapi import Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import construct_settings
 from app.modules.template import schemas_template, service_template
 from app.shared.db.database import get_db
 from app.types.module import Module
@@ -11,6 +14,10 @@ module = Module(
     root=root,
     tag="Template",
 )
+
+_settings = construct_settings()
+_base_dir = Path(_settings.DATA_PATH_MODULES)
+module.add_data_dir_from(_base_dir, root, "files")
 
 
 # --- File-based routes ---
