@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import repositories_auth
 from app.core.config import Settings
 from app.core.users import models_users, repositories_users
-from app.shared.utils.settings import get_settings
+from app.core.utils.settings import get_settings
 from app.core.auth import schemas_auth
 
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"

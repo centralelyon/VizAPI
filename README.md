@@ -34,8 +34,8 @@ docker build -t vizapi:latest .
 To run the Docker container:
 
 ```bash
-docker run -d -p 8000:8000 --name vizapi vizapi:latest --env-file .env
-```
+docker run -d --name vizapi --hostname vizapi -p 8000:8000 --env-file .env -v $(pwd)/vizapi-data:/vizapi/data vizapi:latest
+  ```
 
 or using Docker Compose:
 

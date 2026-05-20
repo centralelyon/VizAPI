@@ -7,8 +7,19 @@ from app.module import all_modules
 from app.shared.db.database import Base, engine
 
 
+def _ensure_module_data_dirs() -> None:
+    required_dirs = [
+        directory
+        for module in all_modules
+        for directory in getattr(module, "data_dirs", [])
+    ]
+    for directory in required_dirs:
+        directory.mkdir(parents=True, exist_ok=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _ensure_module_data_dirs()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -20,6 +31,7 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan,
 )
+
 
 app.add_middleware(
     CORSMiddleware,

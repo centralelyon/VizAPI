@@ -1,5 +1,6 @@
+from pathlib import Path
+
 from fastapi import APIRouter
-from starlette.routing import Mount
 # from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -9,6 +10,7 @@ class CoreModule:
         root: str,
         tag: str,
         router: APIRouter | None = None,
+        data_dirs: list[Path] | None = None,
         # permissions: type[ModulePermissions] | None = None,
     ):
         """
@@ -21,7 +23,14 @@ class CoreModule:
         self.root = root
         self.router = router or APIRouter(tags=[tag])
         self.mounts: list[tuple[str, object, str]] = []
+        self.data_dirs = data_dirs or []
         # self.permissions = permissions
+
+    def add_data_dir(self, path: Path) -> None:
+        self.data_dirs.append(path)
+
+    def add_data_dir_from(self, base: Path, *parts: str) -> None:
+        self.data_dirs.append(base.joinpath(*parts))
 
 
 class Module(CoreModule):
@@ -32,6 +41,7 @@ class Module(CoreModule):
         # default_allowed_groups_ids: list[GroupType] | None = None,
         # default_allowed_account_types: list[AccountType] | None = None,
         router: APIRouter | None = None,
+        data_dirs: list[Path] | None = None,
         # permissions: type[ModulePermissions] | None = None,
     ):
         """
@@ -48,4 +58,5 @@ class Module(CoreModule):
         # self.default_allowed_account_types = default_allowed_account_types
         self.router = router or APIRouter(tags=[tag])
         self.mounts: list[tuple[str, object, str]] = []
+        self.data_dirs = data_dirs or []
         # self.permissions = permissions
