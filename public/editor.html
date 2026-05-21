@@ -603,9 +603,9 @@
       </div>
       <nav class="top-actions" aria-label="Server links">
         <span class="server-pill" id="serverPill"></span>
-        <a class="link-button" href="/images">Images JSON</a>
-        <a class="link-button" href="/data">Datasets JSON</a>
-        <a class="link-button" href="/">Server Help</a>
+        <a class="link-button" id="imagesLink" href="#">Images JSON</a>
+        <a class="link-button" id="dataLink" href="#">Datasets JSON</a>
+        <a class="link-button" id="helpLink" href="#">Server Help</a>
       </nav>
     </header>
 
@@ -698,9 +698,8 @@
   <script>
     (() => {
       const SERVER_ORIGIN_FROM_SERVER = __SERVER_ORIGIN_JSON__;
-      const serverOrigin = window.location.origin && window.location.origin !== "null"
-        ? window.location.origin
-        : SERVER_ORIGIN_FROM_SERVER;
+      const serverOrigin = SERVER_ORIGIN_FROM_SERVER;
+      const baseUrl = serverOrigin + "/";
       const fallbackImageNames = ["original.png", "ffox.png", "gimp.png"];
       const editor = document.getElementById("specEditor");
       const exampleSelect = document.getElementById("exampleSelect");
@@ -783,7 +782,7 @@
       }
 
       function imageUrl(path, params = {}) {
-        const url = new URL(`/process/${imagePath(path)}`, serverOrigin);
+        const url = new URL(`process/${imagePath(path)}`, baseUrl);
         Object.entries(params).forEach(([key, value]) => {
           if (value !== undefined && value !== null && value !== "") {
             url.searchParams.set(key, value);
@@ -801,7 +800,7 @@
           return raw;
         }
         if (raw.startsWith("/")) {
-          return new URL(raw, serverOrigin).toString();
+          return new URL(raw.slice(1), baseUrl).toString();
         }
 
         const queryIndex = raw.indexOf("?");
@@ -810,9 +809,9 @@
         const normalizedPath = path.replace(/^\/+/, "");
         const routePrefixes = ["process/", "image/", "img/", "images/"];
         const routePath = routePrefixes.some((prefix) => normalizedPath.startsWith(prefix))
-          ? `/${imagePath(normalizedPath)}`
-          : `/process/${imagePath(normalizedPath)}`;
-        const url = new URL(routePath, serverOrigin);
+          ? imagePath(normalizedPath)
+          : `process/${imagePath(normalizedPath)}`;
+        const url = new URL(routePath, baseUrl);
         new URLSearchParams(query).forEach((queryValue, key) => {
           url.searchParams.set(key, queryValue);
         });
@@ -825,11 +824,11 @@
       }
 
       function datasetIndexUrl() {
-        return new URL("/data", serverOrigin);
+        return new URL("data", baseUrl);
       }
 
       function datasetFileUrl(name) {
-        return new URL(`/data/${imagePath(name)}`, serverOrigin);
+        return new URL(`data/${imagePath(name)}`, baseUrl);
       }
 
       function fetchDataset(url) {
@@ -971,7 +970,7 @@
 
       async function loadImages() {
         try {
-          const response = await fetch(new URL("/images", serverOrigin), { cache: "no-store" });
+          const response = await fetch(new URL("images", baseUrl), { cache: "no-store" });
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
@@ -2516,6 +2515,9 @@
         originLine.textContent = `Server image URLs from ${serverOrigin} become Vega marks, channels, and tooltips.`;
         serverPill.textContent = serverOrigin;
         serverPill.title = serverOrigin;
+        document.getElementById("imagesLink").href = new URL("images", baseUrl).toString();
+        document.getElementById("dataLink").href = new URL("data", baseUrl).toString();
+        document.getElementById("helpLink").href = serverOrigin;
         installExamples();
         await loadImages();
         await loadDatasets();
