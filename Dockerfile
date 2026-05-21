@@ -16,6 +16,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY pyproject.toml .
+COPY public public/
 COPY app app/
 
 # this is wrong
