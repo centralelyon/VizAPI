@@ -1,9 +1,10 @@
+FROM python:3.13.13-trixie
+
 # Add metadata labels to the image
 LABEL org.opencontainers.image.source=https://github.com/centralelyon/VizAPI
 LABEL org.opencontainers.image.description="VizAPI docker image."
 LABEL org.opencontainers.image.licenses=MIT
 
-FROM python:3.13.13-trixie
 
 RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
