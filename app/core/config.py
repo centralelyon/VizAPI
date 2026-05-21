@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     def __init__(self, _env_file: str = ".env"):
         super().__init__(_env_file=_env_file)
 
+    SERVER_BASE_URL: str = ""
+
     GITHUB_CLIENT_ID: str
     GITHUB_CLIENT_SECRET: str
     GITHUB_REDIRECT_URI: str

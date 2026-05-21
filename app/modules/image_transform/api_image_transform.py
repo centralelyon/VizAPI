@@ -20,6 +20,7 @@ module = Module(
 
 _settings = construct_settings()
 _base_dir = Path(_settings.DATA_PATH_MODULES)
+_server_base = _settings.SERVER_BASE_URL.rstrip("/") or None
 module.add_data_dir_from(_base_dir, "image_transform", "images")
 module.add_data_dir_from(_base_dir, "image_transform", "data")
 
@@ -72,7 +73,8 @@ async def get_data():
     status_code=200,
 )
 async def open_editor(request: Request):
-    server_origin = str(request.base_url).rstrip("/") + f"/{root}"
+    base = _server_base or str(request.base_url).rstrip("/")
+    server_origin = f"{base}/{root}"
     editor_path = Path(__file__).resolve().parents[3] / "public" / "editor.html"
     html = editor_path.read_text(encoding="utf-8").replace(
         "__SERVER_ORIGIN_JSON__", json.dumps(server_origin)
