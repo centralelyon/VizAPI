@@ -1,6 +1,6 @@
 # VizAPI
 
-**VizAPI** is a scalable, multi-module backend API built with [FastAPI](https://fastapi.tiangolo.com/). It serves as the unified backend for multiple applications — data visualization dashboards, video management, user data persistence, and future services.
+**VizAPI** is a modular backend API built with [FastAPI](https://fastapi.tiangolo.com/). It serves as the unified backend for multiple applications — data visualization frontends, file management, user data persistence, and future services.
 
 ---
 
@@ -11,7 +11,7 @@
 | **Multi-module** | Each business domain lives in its own isolated module |
 | **Clean architecture** | Strict separation: API → Service → Repository |
 | **Extensible** | Adding a new module never interacts with existing ones |
-| **Testable** | Every layer is independently testable; no hidden coupling |
+| **Testable** | Every layer is independently testable |
 
 ---
 
@@ -20,8 +20,8 @@
 ```text
 app/
 ├── core/          # Auth, users, permissions, security (shared by all modules)
-├── shared/        # DB session, base models, utilities
-└── modules/       # Business domains (video, analytics, site_x…)
+├── modules/       # Business domains (video, analytics, site_x…)
+└── shared/        # DB session, base models, utilities
 ```
 
 * The **core** handles everything cross-cutting: who you are and what you are allowed to do. 
