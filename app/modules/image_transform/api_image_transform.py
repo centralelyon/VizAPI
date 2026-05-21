@@ -103,7 +103,7 @@ async def _serve_image(image_name: str, request: Request) -> Response:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except OSError, UnidentifiedImageError:
+    except (OSError, UnidentifiedImageError):
         raise HTTPException(status_code=415, detail="Unsupported image file.")
     if payload is None:
         raise HTTPException(status_code=404, detail="Image not found.")

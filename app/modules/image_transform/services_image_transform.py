@@ -10,12 +10,10 @@ from PIL import (
     ImageEnhance,
     ImageFilter,
     ImageOps,
-    UnidentifiedImageError,
 )
 
 from app.modules.image_transform.repositories_image_transform import (
     EXTENSION_FORMATS,
-    DATA_CONTENT_TYPES,
     list_images,
     list_datasets,
     resolve_request_image_path,
@@ -39,6 +37,7 @@ Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 # ---------------------------------------------------------------------------
 # Public API called by the route layer
 # ---------------------------------------------------------------------------
+
 
 def get_images() -> dict:
     return {"images": list_images()}
@@ -69,11 +68,14 @@ def get_data_file(file_path: str) -> tuple[bytes, str] | tuple[None, None]:
 # Image rendering
 # ---------------------------------------------------------------------------
 
-def render_local_image(image_path: Path, query: dict[str, list[str]]) -> tuple[bytes, str]:
+
+def render_local_image(
+    image_path: Path, query: dict[str, list[str]]
+) -> tuple[bytes, str]:
     with Image.open(image_path) as image:
-        default_format = EXTENSION_FORMATS.get(image_path.suffix.lower()) or normalize_format(
-            image.format
-        )
+        default_format = EXTENSION_FORMATS.get(
+            image_path.suffix.lower()
+        ) or normalize_format(image.format)
         return render_open_image(image, query, default_format)
 
 
@@ -116,6 +118,7 @@ def normalize_image_mode(image: Image.Image) -> Image.Image:
 # ---------------------------------------------------------------------------
 # Transform operations
 # ---------------------------------------------------------------------------
+
 
 def crop_image(image: Image.Image, query: dict[str, list[str]]) -> Image.Image:
     bbox = parse_box(query, image.size)
@@ -289,6 +292,7 @@ def parse_gravity(query: dict[str, list[str]]) -> tuple[float, float]:
 # Color adjustments
 # ---------------------------------------------------------------------------
 
+
 def apply_color_adjustments(
     image: Image.Image,
     query: dict[str, list[str]],
@@ -424,6 +428,7 @@ def pixelize_image(image: Image.Image, query: dict[str, list[str]]) -> Image.Ima
 # Encoding
 # ---------------------------------------------------------------------------
 
+
 def encode_image(
     image: Image.Image,
     query: dict[str, list[str]],
@@ -474,6 +479,7 @@ def flatten_for_jpeg(image: Image.Image) -> Image.Image:
 # ---------------------------------------------------------------------------
 # Query parameter parsers
 # ---------------------------------------------------------------------------
+
 
 def parse_output_format(query: dict[str, list[str]], default_format: str | None) -> str:
     requested = first_query_value(query, "format")
@@ -623,6 +629,7 @@ def parse_color(value: str) -> tuple[int, int, int, int]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def first_query_value(query: dict[str, list[str]], name: str) -> str | None:
     values = query.get(name)
