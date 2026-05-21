@@ -1,0 +1,11 @@
+Name;Green;Red;Vegetable;Fruit;Delicious;Taste;image;Vitamin_C_mg_per_100g;Sugar_g_per_100g
+Kiwi;1;0;0;1;0;Sweet;kiwi.jpg;92.7;8.99
+Cucumber;1;0;1;0;0;Neutral;cucumber.jpg;2.8;1.67
+Pickle;1;0;1;0;0;Sour;pickle.jpg;2.3;1.06
+Apple;1;1;0;1;1;Sweet;apple.jpg;4.6;10.39
+Carrot;0;1;1;0;0;Sweet;carrot.jpg;5.9;4.74
+Pepper;1;1;1;0;1;Neutral;pepper.jpg;104.1;3.3
+Lemon;0;0;0;1;1;Sour;lemon.jpg;53;2.5
+Banana;0;0;0;1;1;Mellow;banana.jpg;8.7;12.23
+Strawberry;0;0;0;1;1;Sweet;strawberry.jpg;58.8;4.89
+Pear;0;0;0;1;1;Sweet;pear.jpg;4.3;9.75
