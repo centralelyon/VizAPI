@@ -1,6 +1,6 @@
 # VizAPI
 
-FastAPI service that aggregates core and module-specific endpoints under a single API. 
+FastAPI service that aggregates core and module-specific endpoints under a single API.
 
 ## Requirements
 
