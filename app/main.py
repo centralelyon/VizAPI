@@ -1,10 +1,19 @@
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import construct_settings
 from app.module import all_modules
 from app.shared.db.database import Base, engine
+
+_settings = construct_settings()
+_root_path = (
+    urlparse(_settings.SERVER_BASE_URL).path.rstrip("/")
+    if _settings.SERVER_BASE_URL
+    else ""
+)
 
 
 def _ensure_module_data_dirs() -> None:
@@ -30,6 +39,7 @@ app = FastAPI(
     title="VizAPI",
     version="0.0.1",
     lifespan=lifespan,
+    root_path=_root_path,
 )
 
 

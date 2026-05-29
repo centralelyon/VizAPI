@@ -6,7 +6,7 @@ from app.core.users import schemas_user
 
 root = "users"
 module = CoreModule(
-    root="users",
+    root=root,
     tag="Users",
 )
 

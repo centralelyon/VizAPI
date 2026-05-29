@@ -1,0 +1,2612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glacis Vega Editor</title>
+  <style>
+    :root {
+      --bg: #eef2f3;
+      --panel: #ffffff;
+      --panel-soft: #f7fafb;
+      --ink: #111827;
+      --muted: #607080;
+      --line: #d6dee5;
+      --accent: #0f766e;
+      --accent-strong: #0b5d57;
+      --accent-warm: #c2412d;
+      --error: #b91c1c;
+      --success: #166534;
+      --warning: #92400e;
+      --code-bg: #101419;
+      --code-ink: #e7edf3;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 70px;
+      padding: 14px 18px;
+      background: var(--panel-soft);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      min-width: 0;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+
+    .brand p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .top-actions,
+    .toolbar,
+    .chip-row,
+    .image-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    a,
+    button,
+    select {
+      font: inherit;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    button,
+    select,
+    .link-button {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--ink);
+      padding: 0 10px;
+      cursor: pointer;
+    }
+
+    button:hover,
+    select:hover,
+    .link-button:hover {
+      border-color: #9fb0bf;
+    }
+
+    button:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    input:focus-visible,
+    [contenteditable="true"]:focus-visible {
+      outline: 2px solid #f59e0b;
+      outline-offset: 2px;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    button.primary:hover {
+      background: var(--accent-strong);
+      border-color: var(--accent-strong);
+    }
+
+    button.subtle {
+      background: var(--panel-soft);
+    }
+
+    button:disabled {
+      cursor: progress;
+      opacity: 0.7;
+    }
+
+    .workspace {
+      flex: 0 0 calc(100vh - 70px);
+      display: grid;
+      grid-template-columns: minmax(360px, 0.92fr) minmax(430px, 1.08fr);
+      gap: 1px;
+      height: calc(100vh - 70px);
+      min-height: 0;
+      background: var(--line);
+    }
+
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+    }
+
+    .dataset-panel {
+      flex: 0 0 auto;
+      min-height: 360px;
+      border-top: 1px solid var(--line);
+    }
+
+    .panel-header {
+      min-height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .panel-title {
+      min-width: 150px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .panel-title span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .editor-shell {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      min-height: 280px;
+      resize: none;
+      border: 0;
+      border-radius: 0;
+      padding: 16px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      tab-size: 2;
+    }
+
+    .helperbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-top: 1px solid #25303a;
+      background: #18202a;
+      color: #cbd5e1;
+    }
+
+    .helperbar small {
+      line-height: 1.35;
+    }
+
+    .helperbar button {
+      min-height: 30px;
+      background: #222c38;
+      color: #e7edf3;
+      border-color: #344255;
+    }
+
+    .preview-body {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      padding: 16px;
+      background: #f4f7f8;
+    }
+
+    #vis {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    #vis .vega-embed,
+    #vis canvas,
+    #vis svg {
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .message {
+      min-height: 48px;
+      max-height: 142px;
+      margin: 0;
+      overflow: auto;
+      padding: 10px 14px;
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .message[data-tone="error"] {
+      background: #fef2f2;
+      color: var(--error);
+    }
+
+    .message[data-tone="success"] {
+      background: #f0fdf4;
+      color: var(--success);
+    }
+
+    .message[data-tone="warning"] {
+      background: #fffbeb;
+      color: var(--warning);
+    }
+
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 0 4px;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    .toggle input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .image-strip {
+      align-content: center;
+      max-width: 760px;
+      overflow: hidden;
+    }
+
+    .image-strip button {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .server-pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 360px;
+      min-height: 34px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .data-table-shell {
+      flex: 1;
+      min-height: 220px;
+      overflow: auto;
+      background: #ffffff;
+    }
+
+    .channel-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .channel-controls label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .channel-controls select {
+      width: 100%;
+      min-width: 0;
+      color: var(--ink);
+      font-weight: 400;
+    }
+
+    .image-source-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .image-source-controls label,
+    .image-map-row label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .image-map {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .image-map[hidden] {
+      display: none;
+    }
+
+    .image-map-row {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .visual-channel-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .visual-channel-list:empty {
+      display: none;
+    }
+
+    .visual-channel-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 1fr) minmax(110px, 0.8fr) minmax(150px, 1fr) minmax(90px, 0.7fr) minmax(90px, 0.7fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .visual-channel-row label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .visual-channel-row input {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 9px;
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .data-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+      font-size: 13px;
+    }
+
+    .data-table th,
+    .data-table td {
+      min-width: 132px;
+      max-width: 280px;
+      height: 34px;
+      padding: 7px 9px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .data-table th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #edf3f4;
+      color: #334155;
+      font-weight: 700;
+    }
+
+    .data-table .row-header {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      min-width: 48px;
+      width: 48px;
+      max-width: 48px;
+      padding: 0;
+      text-align: center;
+      background: #edf3f4;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .data-table thead .row-header {
+      z-index: 3;
+    }
+
+    .data-table td {
+      background: #ffffff;
+    }
+
+    .data-table td[contenteditable="true"]:focus,
+    .data-table th[contenteditable="true"]:focus {
+      background: #fff7ed;
+      box-shadow: inset 0 0 0 2px #f59e0b;
+      outline: 0;
+    }
+
+    .data-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      padding: 9px 14px;
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .data-message {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .data-count {
+      flex: 0 0 auto;
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 920px) {
+      .topbar,
+      .panel-header,
+      .helperbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .brand p {
+        white-space: normal;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(360px, 48vh) minmax(360px, 1fr);
+        height: auto;
+        min-height: calc(100vh - 70px);
+      }
+
+      .toolbar,
+      .top-actions,
+      .chip-row {
+        width: 100%;
+      }
+
+      button,
+      select,
+      .link-button,
+      .server-pill {
+        max-width: 100%;
+      }
+
+      .data-footer {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .data-message {
+        white-space: normal;
+      }
+
+      .visual-channel-row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Glacis Vega Editor</h1>
+        <p id="originLine">Server image URLs become Vega marks, channels, and tooltips.</p>
+      </div>
+      <nav class="top-actions" aria-label="Server links">
+        <span class="server-pill" id="serverPill"></span>
+        <a class="link-button" id="imagesLink" href="#">Images JSON</a>
+        <a class="link-button" id="dataLink" href="#">Datasets JSON</a>
+        <a class="link-button" id="helpLink" href="#">Server Help</a>
+      </nav>
+    </header>
+
+    <main class="workspace">
+      <section class="panel" aria-label="Vega specification editor">
+        <div class="panel-header">
+          <div class="panel-title">
+            <h2>Specification</h2>
+            <span>Edit Vega or Vega-Lite JSON. Examples are generated from this server.</span>
+          </div>
+          <div class="toolbar">
+            <select id="exampleSelect" aria-label="Example specification"></select>
+            <button type="button" id="formatBtn" class="subtle">Format</button>
+            <button type="button" id="resetBtn" class="subtle">Reset</button>
+          </div>
+        </div>
+        <div class="editor-shell">
+          <textarea id="specEditor" spellcheck="false" aria-label="Vega JSON specification"></textarea>
+          <div class="helperbar">
+            <small>Click an image name to insert its processed URL at the cursor.</small>
+            <div class="image-strip" id="imageStrip" aria-label="Available server images"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Vega preview">
+        <div class="panel-header">
+          <div class="panel-title">
+            <h2>Preview</h2>
+            <span>Rendered with Vega, Vega-Lite, and Vega-Embed in the browser.</span>
+          </div>
+          <div class="toolbar">
+            <button type="button" id="runBtn" class="primary">Run</button>
+            <label class="toggle"><input type="checkbox" id="autoRender" checked> Auto</label>
+            <button type="button" id="copyBtn" class="subtle">Copy Spec</button>
+          </div>
+        </div>
+        <div class="preview-body">
+          <div id="vis" aria-live="polite"></div>
+        </div>
+        <pre id="messages" class="message">Loading Vega libraries...</pre>
+      </section>
+    </main>
+
+    <section class="panel dataset-panel" aria-label="Editable dataset table">
+      <div class="panel-header">
+        <div class="panel-title">
+          <h2>Dataset</h2>
+          <span>Load files from data/, edit cells, then map columns into Vega channels.</span>
+        </div>
+        <div class="toolbar">
+          <select id="datasetSelect" aria-label="Dataset file"></select>
+          <button type="button" id="loadDatasetBtn" class="subtle">Load</button>
+          <button type="button" id="useImageMarksBtn" class="primary">Use Image Marks</button>
+          <button type="button" id="addVisualChannelBtn" class="subtle">Add Visual Channel</button>
+          <button type="button" id="addDataRowBtn" class="subtle">Add Row</button>
+          <button type="button" id="addDataColumnBtn" class="subtle">Add Column</button>
+        </div>
+      </div>
+      <div class="channel-controls" aria-label="Vega channel encoding selectors">
+        <label>X <select id="xChannelSelect" aria-label="X channel column"></select></label>
+        <label>Y <select id="yChannelSelect" aria-label="Y channel column"></select></label>
+        <label>Color <select id="colorChannelSelect" aria-label="Color channel column"></select></label>
+      </div>
+      <div class="image-source-controls" aria-label="Image source selectors">
+        <label>Image Source
+          <select id="imageSourceModeSelect" aria-label="Image source mode">
+            <option value="column">Column links</option>
+            <option value="value-map">Map values to images</option>
+          </select>
+        </label>
+        <label id="imageColumnControl">Image Column <select id="imageChannelSelect" aria-label="Image URL column"></select></label>
+        <label id="imageValueControl">Value Column <select id="imageValueColumnSelect" aria-label="Column whose values map to images"></select></label>
+      </div>
+      <div id="imageMap" class="image-map" aria-label="Value to image mapping" hidden></div>
+      <div id="visualChannelList" class="visual-channel-list" aria-label="Server image processing visual channels"></div>
+      <div class="data-table-shell">
+        <table id="dataTable" class="data-table" aria-label="Editable dataset grid"></table>
+      </div>
+      <div class="data-footer">
+        <span id="dataMessage" class="data-message">Loading datasets...</span>
+        <span id="dataCount" class="data-count">0 rows x 0 columns</span>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <script>
+    (() => {
+      const SERVER_ORIGIN_FROM_SERVER = __SERVER_ORIGIN_JSON__;
+      const serverOrigin = SERVER_ORIGIN_FROM_SERVER;
+      const baseUrl = serverOrigin + "/";
+      const fallbackImageNames = ["original.png", "ffox.png", "gimp.png"];
+      const editor = document.getElementById("specEditor");
+      const exampleSelect = document.getElementById("exampleSelect");
+      const formatBtn = document.getElementById("formatBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const runBtn = document.getElementById("runBtn");
+      const autoRender = document.getElementById("autoRender");
+      const copyBtn = document.getElementById("copyBtn");
+      const messages = document.getElementById("messages");
+      const vis = document.getElementById("vis");
+      const imageStrip = document.getElementById("imageStrip");
+      const originLine = document.getElementById("originLine");
+      const serverPill = document.getElementById("serverPill");
+      const datasetSelect = document.getElementById("datasetSelect");
+      const loadDatasetBtn = document.getElementById("loadDatasetBtn");
+      const useImageMarksBtn = document.getElementById("useImageMarksBtn");
+      const addVisualChannelBtn = document.getElementById("addVisualChannelBtn");
+      const addDataRowBtn = document.getElementById("addDataRowBtn");
+      const addDataColumnBtn = document.getElementById("addDataColumnBtn");
+      const dataTable = document.getElementById("dataTable");
+      const dataMessage = document.getElementById("dataMessage");
+      const dataCount = document.getElementById("dataCount");
+      const imageSourceModeSelect = document.getElementById("imageSourceModeSelect");
+      const imageColumnControl = document.getElementById("imageColumnControl");
+      const imageValueControl = document.getElementById("imageValueControl");
+      const imageValueColumnSelect = document.getElementById("imageValueColumnSelect");
+      const imageMap = document.getElementById("imageMap");
+      const visualChannelList = document.getElementById("visualChannelList");
+      const channelSelects = {
+        image: document.getElementById("imageChannelSelect"),
+        color: document.getElementById("colorChannelSelect"),
+        x: document.getElementById("xChannelSelect"),
+        y: document.getElementById("yChannelSelect")
+      };
+      let imageNames = fallbackImageNames;
+      let datasetNames = [];
+      let datasetColumns = [];
+      let datasetRows = [];
+      let imageValueMappings = {};
+      let visualEncodings = [];
+      let nextVisualEncodingId = 1;
+      let datasetSpecActive = false;
+      let datasetApplyTimer = null;
+      let pendingFocus = null;
+      let currentResult = null;
+      let renderTimer = null;
+
+      const examples = [
+        {
+          id: "vega-image-marks",
+          label: "Vega image marks",
+          build: buildVegaImageMarksSpec
+        },
+        {
+          id: "vega-lite-url-channels",
+          label: "Vega-Lite URL channels",
+          build: buildVegaLiteUrlChannelsSpec
+        },
+        {
+          id: "vega-parameter-matrix",
+          label: "Vega parameter matrix",
+          build: buildVegaParameterMatrixSpec
+        }
+      ];
+
+      const visualChannelDefinitions = {
+        size: { label: "Size", kind: "number", min: 48, max: 96, step: "1" },
+        blur: { label: "Blur", kind: "number", min: 0, max: 6, step: "0.1" },
+        pixelize: { label: "Pixelize", kind: "number", min: 1, max: 14, step: "1" },
+        rotate: { label: "Rotate", kind: "number", min: -20, max: 20, step: "1" },
+        brightness: { label: "Brightness", kind: "number", min: 0.75, max: 1.35, step: "0.05" },
+        contrast: { label: "Contrast", kind: "number", min: 0.8, max: 1.45, step: "0.05" },
+        saturation: { label: "Saturation", kind: "number", min: 0.45, max: 1.8, step: "0.05" },
+        tint: { label: "Tint", kind: "color", min: "#f59e0b", max: "#2563eb", step: "" },
+        recolor: { label: "Recolor", kind: "color", min: "#0f766e", max: "#c2412d", step: "" }
+      };
+
+      function imagePath(path) {
+        return String(path).split("/").map(encodeURIComponent).join("/");
+      }
+
+      function imageUrl(path, params = {}) {
+        const url = new URL(`process/${imagePath(path)}`, baseUrl);
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            url.searchParams.set(key, value);
+          }
+        });
+        return url.toString();
+      }
+
+      function imageSourceUrl(value, params = {}) {
+        const raw = String(value || "").trim();
+        if (!raw) {
+          return "";
+        }
+        if (/^(https?:|data:|blob:)/i.test(raw)) {
+          return raw;
+        }
+        if (raw.startsWith("/")) {
+          return new URL(raw.slice(1), baseUrl).toString();
+        }
+
+        const queryIndex = raw.indexOf("?");
+        const path = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
+        const query = queryIndex >= 0 ? raw.slice(queryIndex + 1) : "";
+        const normalizedPath = path.replace(/^\/+/, "");
+        const routePrefixes = ["process/", "image/", "img/", "images/"];
+        const routePath = routePrefixes.some((prefix) => normalizedPath.startsWith(prefix))
+          ? imagePath(normalizedPath)
+          : `process/${imagePath(normalizedPath)}`;
+        const url = new URL(routePath, baseUrl);
+        new URLSearchParams(query).forEach((queryValue, key) => {
+          url.searchParams.set(key, queryValue);
+        });
+        Object.entries(params).forEach(([key, paramValue]) => {
+          if (!url.searchParams.has(key) && paramValue !== undefined && paramValue !== null && paramValue !== "") {
+            url.searchParams.set(key, paramValue);
+          }
+        });
+        return url.toString();
+      }
+
+      function datasetIndexUrl() {
+        return new URL("data", baseUrl);
+      }
+
+      function datasetFileUrl(name) {
+        return new URL(`data/${imagePath(name)}`, baseUrl);
+      }
+
+      function fetchDataset(url) {
+        return fetch(url, {
+          cache: "no-store",
+          headers: { "Accept": "text/csv, text/tab-separated-values, application/json;q=0.9, */*;q=0.1" }
+        });
+      }
+
+      function setStatus(text, tone = "info") {
+        messages.textContent = text;
+        messages.dataset.tone = tone;
+      }
+
+      function setDataStatus(text) {
+        dataMessage.textContent = text;
+      }
+
+      function previewChartSize() {
+        const rect = vis.getBoundingClientRect();
+        return {
+          width: Math.max(360, Math.floor(rect.width || 760)),
+          height: Math.max(260, Math.floor(rect.height || 460))
+        };
+      }
+
+      function selectedExample() {
+        return examples.find((example) => example.id === exampleSelect.value) || examples[0];
+      }
+
+      function writeSpec(spec) {
+        editor.value = JSON.stringify(spec, null, 2);
+      }
+
+      function loadSelectedExample() {
+        datasetSpecActive = false;
+        writeSpec(selectedExample().build(imageNames));
+        queueRender(0);
+      }
+
+      function parseSpec() {
+        const raw = editor.value.trim();
+        if (!raw) {
+          throw new Error("The editor is empty.");
+        }
+        return JSON.parse(raw);
+      }
+
+      async function renderSpec() {
+        clearTimeout(renderTimer);
+        let spec;
+        try {
+          spec = parseSpec();
+        } catch (error) {
+          setStatus(`JSON error: ${error.message}`, "error");
+          return;
+        }
+
+        if (!window.vegaEmbed) {
+          setStatus("Vega libraries are not available. Check network access to cdn.jsdelivr.net.", "error");
+          return;
+        }
+
+        runBtn.disabled = true;
+        try {
+          if (currentResult && currentResult.view) {
+            currentResult.view.finalize();
+          }
+          vis.innerHTML = "";
+          currentResult = await window.vegaEmbed(vis, spec, {
+            renderer: "canvas",
+            actions: {
+              export: true,
+              source: true,
+              compiled: true,
+              editor: false
+            }
+          });
+          const type = String(spec.$schema || "").includes("vega-lite") ? "Vega-Lite" : "Vega";
+          setStatus(`${type} rendered from ${serverOrigin}`, "success");
+        } catch (error) {
+          setStatus(error && error.message ? error.message : String(error), "error");
+        } finally {
+          runBtn.disabled = false;
+        }
+      }
+
+      function queueRender(delay = 650) {
+        if (!autoRender.checked && delay !== 0) {
+          return;
+        }
+        clearTimeout(renderTimer);
+        renderTimer = setTimeout(renderSpec, delay);
+      }
+
+      function installExamples() {
+        exampleSelect.innerHTML = "";
+        examples.forEach((example) => {
+          const option = document.createElement("option");
+          option.value = example.id;
+          option.textContent = example.label;
+          exampleSelect.appendChild(option);
+        });
+      }
+
+      function renderImageStrip() {
+        imageStrip.innerHTML = "";
+        imageNames.forEach((name) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "subtle";
+          button.textContent = name;
+          button.title = imageUrl(name, { width: 180, height: 180, fit: "cover", format: "png" });
+          button.addEventListener("click", () => insertAtCursor(button.title));
+          imageStrip.appendChild(button);
+        });
+      }
+
+      function insertAtCursor(text) {
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.value = `${editor.value.slice(0, start)}${text}${editor.value.slice(end)}`;
+        editor.focus();
+        editor.selectionStart = start + text.length;
+        editor.selectionEnd = start + text.length;
+        queueRender();
+      }
+
+      async function copySpec() {
+        try {
+          await navigator.clipboard.writeText(editor.value);
+          setStatus("Specification copied to the clipboard.", "success");
+        } catch (error) {
+          editor.select();
+          document.execCommand("copy");
+          setStatus("Specification selected and copied with the fallback clipboard path.", "success");
+        }
+      }
+
+      async function loadImages() {
+        try {
+          const response = await fetch(new URL("images", baseUrl), { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          if (Array.isArray(payload.images) && payload.images.length > 0) {
+            imageNames = payload.images;
+          } else {
+            setStatus("/images returned no image names; using bundled examples.", "warning");
+          }
+        } catch (error) {
+          setStatus(`Could not load /images: ${error.message}. Using bundled examples.`, "warning");
+        }
+      }
+
+      function imageAt(names, index) {
+        return names[index] || names[0] || fallbackImageNames[index] || fallbackImageNames[0];
+      }
+
+      function blankDataRow() {
+        return Object.fromEntries(datasetColumns.map((column) => [column, ""]));
+      }
+
+      function selectedChannels() {
+        return Object.fromEntries(
+          Object.entries(channelSelects).map(([channel, select]) => [channel, select.value])
+        );
+      }
+
+      function selectedImageSettings() {
+        return {
+          mode: imageSourceModeSelect.value,
+          valueColumn: imageValueColumnSelect.value,
+          mappings: { ...imageValueMappings }
+        };
+      }
+
+      function updateDataCount() {
+        dataCount.textContent = `${datasetRows.length} rows x ${datasetColumns.length} columns`;
+      }
+
+      function uniqueColumnName(rawName, currentIndex = -1, existingColumns = datasetColumns) {
+        const fallback = `Column ${currentIndex >= 0 ? currentIndex + 1 : existingColumns.length + 1}`;
+        const base = String(rawName || "").trim() || fallback;
+        const used = new Set(
+          existingColumns
+            .filter((_, index) => index !== currentIndex)
+            .map((column) => column.toLowerCase())
+        );
+        let candidate = base;
+        let suffix = 2;
+        while (used.has(candidate.toLowerCase())) {
+          candidate = `${base}_${suffix}`;
+          suffix += 1;
+        }
+        return candidate;
+      }
+
+      function stringifyDatasetValue(value) {
+        if (value === null || value === undefined) {
+          return "";
+        }
+        if (typeof value === "object") {
+          return JSON.stringify(value);
+        }
+        return String(value);
+      }
+
+      function setDataset(columns, rows, status) {
+        const previousChannels = selectedChannels();
+        const previousImageSettings = selectedImageSettings();
+        datasetColumns = columns.length > 0 ? columns : ["name", "image"];
+        datasetRows = rows.length > 0
+          ? rows
+          : Array.from({ length: 3 }, () => blankDataRow());
+        renderChannelSelectors(previousChannels);
+        renderImageSourceControls(previousImageSettings);
+        renderVisualEncodings(visualEncodings.filter((encoding) => hasColumn(encoding.attribute)));
+        renderDataTable();
+        setDataStatus(status);
+      }
+
+      function seedEditableDataset(status = "Editable sample dataset loaded from server images.") {
+        const columns = ["name", "image", "group", "value"];
+        const rows = [
+          { name: "Original", image: imageAt(imageNames, 0), group: "source", value: "1" },
+          { name: "Firefox", image: imageAt(imageNames, 1), group: "icon", value: "2" },
+          { name: "Gimp", image: imageAt(imageNames, 2), group: "icon", value: "3" }
+        ];
+        setDataset(columns, rows, status);
+      }
+
+      async function loadDatasets() {
+        try {
+          const response = await fetchDataset(datasetIndexUrl());
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          datasetNames = Array.isArray(payload.datasets)
+            ? payload.datasets.filter((name) => /\.(csv|tsv|json)$/i.test(name))
+            : [];
+          renderDatasetSelect();
+          if (datasetNames.length > 0) {
+            await loadSelectedDataset();
+          } else {
+            seedEditableDataset("No supported datasets found in data/. Using an editable sample.");
+          }
+        } catch (error) {
+          datasetNames = [];
+          renderDatasetSelect();
+          seedEditableDataset(`Could not load /data: ${error.message}. Using an editable sample.`);
+        }
+      }
+
+      function renderDatasetSelect() {
+        datasetSelect.innerHTML = "";
+        if (datasetNames.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No datasets";
+          datasetSelect.appendChild(option);
+          datasetSelect.disabled = true;
+          loadDatasetBtn.disabled = true;
+          return;
+        }
+
+        datasetSelect.disabled = false;
+        loadDatasetBtn.disabled = false;
+        datasetNames.forEach((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          datasetSelect.appendChild(option);
+        });
+      }
+
+      function hasColumn(name) {
+        return Boolean(name && datasetColumns.includes(name));
+      }
+
+      function numericColumns() {
+        return datasetColumns.filter((column) => isNumericDatasetColumn(column));
+      }
+
+      function isNumericDatasetColumn(column) {
+        const values = datasetRows
+          .map((row) => coerceDatasetValue(row[column]))
+          .filter((value) => value !== "" && value !== null && value !== undefined);
+        return values.length > 0 && values.every((value) => typeof value === "number" && Number.isFinite(value));
+      }
+
+      function preferredColumn(candidates, fallback = "") {
+        const found = findDatasetColumn(candidates);
+        if (found) {
+          return found;
+        }
+        return fallback && hasColumn(fallback) ? fallback : "";
+      }
+
+      function defaultChannelSelection(previous = {}) {
+        const color = hasColumn(previous.color)
+          ? previous.color
+          : preferredColumn(["group", "category", "type", "taste"]);
+        const defaultX = preferredColumn(["name", "label", "title"], datasetColumns[0] || "");
+        const defaultY = preferredColumn(["taste", "group", "category", "type"], datasetColumns.find((column) => column !== defaultX) || "");
+
+        return {
+          color,
+          x: hasColumn(previous.x) ? previous.x : defaultX,
+          y: hasColumn(previous.y) ? previous.y : defaultY
+        };
+      }
+
+      function renderChannelSelectors(previous = selectedChannels()) {
+        const selection = defaultChannelSelection(previous);
+        renderChannelSelect(channelSelects.x, datasetColumns, selection.x, true);
+        renderChannelSelect(channelSelects.y, datasetColumns, selection.y, true);
+        renderChannelSelect(channelSelects.color, datasetColumns, selection.color, true);
+      }
+
+      function renderChannelSelect(select, columns, value, optional) {
+        select.innerHTML = "";
+        if (optional) {
+          const noneOption = document.createElement("option");
+          noneOption.value = "";
+          noneOption.textContent = "None";
+          select.appendChild(noneOption);
+        }
+        columns.forEach((column) => {
+          const option = document.createElement("option");
+          option.value = column;
+          option.textContent = column;
+          select.appendChild(option);
+        });
+        select.disabled = columns.length === 0 && !optional;
+        select.value = columns.includes(value) ? value : (optional ? "" : columns[0] || "");
+      }
+
+      function renderImageSourceControls(previous = selectedImageSettings()) {
+        const mode = previous.mode === "value-map" ? "value-map" : "column";
+        imageSourceModeSelect.value = mode;
+        imageColumnControl.hidden = mode !== "column";
+        imageValueControl.hidden = mode !== "value-map";
+        renderChannelSelect(
+          channelSelects.image,
+          datasetColumns,
+          hasColumn(channelSelects.image.value) ? channelSelects.image.value : preferredColumn(["image", "img", "url", "src", "href"], datasetColumns[0] || ""),
+          false
+        );
+        renderChannelSelect(
+          imageValueColumnSelect,
+          datasetColumns,
+          hasColumn(previous.valueColumn) ? previous.valueColumn : (channelSelects.color.value || channelSelects.x.value || datasetColumns[0] || ""),
+          false
+        );
+        imageValueMappings = keepImageMappings(previous.mappings || {});
+        renderImageMap();
+      }
+
+      function keepImageMappings(previousMappings) {
+        const mappings = {};
+        imageMapValues().forEach((value, index) => {
+          mappings[value] = previousMappings[value] || imageAt(imageNames, index);
+        });
+        return mappings;
+      }
+
+      function imageMapValues() {
+        const column = imageValueColumnSelect.value;
+        if (!column) {
+          return [];
+        }
+        return Array.from(
+          new Set(
+            currentDatasetValues()
+              .map((row) => String(row[column] || "").trim())
+              .filter(Boolean)
+          )
+        );
+      }
+
+      function renderImageMap() {
+        const isMapMode = imageSourceModeSelect.value === "value-map";
+        imageMap.hidden = !isMapMode;
+        if (!isMapMode) {
+          imageMap.innerHTML = "";
+          return;
+        }
+
+        imageMap.innerHTML = "";
+        const values = imageMapValues();
+        if (values.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "data-message";
+          empty.textContent = "No values available for image mapping.";
+          imageMap.appendChild(empty);
+          return;
+        }
+
+        values.forEach((value, index) => {
+          const row = document.createElement("div");
+          row.className = "image-map-row";
+          const label = document.createElement("label");
+          label.textContent = value;
+          const select = document.createElement("select");
+          select.dataset.imageMapValue = value;
+          imageNames.forEach((name) => {
+            const option = document.createElement("option");
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+          });
+          select.value = imageNames.includes(imageValueMappings[value])
+            ? imageValueMappings[value]
+            : imageAt(imageNames, index);
+          imageValueMappings[value] = select.value;
+          label.appendChild(select);
+          row.appendChild(label);
+          imageMap.appendChild(row);
+        });
+      }
+
+      function currentVisualEncodings() {
+        return Array.from(visualChannelList.querySelectorAll(".visual-channel-row"))
+          .map((row) => ({
+            id: Number(row.dataset.encodingId),
+            attribute: row.querySelector("[data-encoding-field='attribute']").value,
+            type: row.querySelector("[data-encoding-field='type']").value,
+            channel: row.querySelector("[data-encoding-field='channel']").value,
+            min: row.querySelector("[data-encoding-field='min']").value,
+            max: row.querySelector("[data-encoding-field='max']").value
+          }))
+          .filter((encoding) => encoding.attribute && encoding.channel);
+      }
+
+      function addVisualEncoding(config = {}) {
+        const channel = config.channel || "blur";
+        const definition = visualChannelDefinitions[channel];
+        const numeric = numericColumns();
+        const encoding = {
+          id: nextVisualEncodingId,
+          attribute: config.attribute || numeric[0] || channelSelects.color.value || channelSelects.x.value || datasetColumns[0] || "",
+          type: config.type || (numeric.includes(config.attribute || numeric[0]) ? "linear" : "category"),
+          channel,
+          min: config.min ?? String(definition.min),
+          max: config.max ?? String(definition.max)
+        };
+        nextVisualEncodingId += 1;
+        visualEncodings.push(encoding);
+        renderVisualEncodings();
+        applyDatasetImageMarks(false);
+      }
+
+      function renderVisualEncodings(previous = visualEncodings) {
+        visualEncodings = previous.map((encoding) => ({ ...encoding }));
+        visualChannelList.innerHTML = "";
+        visualEncodings.forEach((encoding) => {
+          const row = document.createElement("div");
+          row.className = "visual-channel-row";
+          row.dataset.encodingId = String(encoding.id);
+          row.appendChild(buildEncodingSelect("Attribute", "attribute", datasetColumns, encoding.attribute));
+          row.appendChild(buildEncodingSelect("Type", "type", ["linear", "category"], encoding.type));
+          row.appendChild(buildEncodingSelect(
+            "Visual Channel",
+            "channel",
+            Object.keys(visualChannelDefinitions),
+            encoding.channel,
+            (value) => visualChannelDefinitions[value].label
+          ));
+          row.appendChild(buildEncodingInput("Min", "min", encoding.channel, encoding.min));
+          row.appendChild(buildEncodingInput("Max", "max", encoding.channel, encoding.max));
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "subtle";
+          removeButton.dataset.encodingRemove = String(encoding.id);
+          removeButton.textContent = "Remove";
+          row.appendChild(removeButton);
+          visualChannelList.appendChild(row);
+        });
+      }
+
+      function buildEncodingSelect(labelText, field, values, selectedValue, labelFor = (value) => value) {
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        const select = document.createElement("select");
+        select.dataset.encodingField = field;
+        values.forEach((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = labelFor(value);
+          select.appendChild(option);
+        });
+        select.value = values.includes(selectedValue) ? selectedValue : values[0] || "";
+        label.appendChild(select);
+        return label;
+      }
+
+      function buildEncodingInput(labelText, field, channel, value) {
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        const input = document.createElement("input");
+        const definition = visualChannelDefinitions[channel];
+        input.dataset.encodingField = field;
+        input.type = definition.kind === "color" ? "color" : "number";
+        input.step = definition.step;
+        input.value = value || String(definition[field]);
+        label.appendChild(input);
+        return label;
+      }
+
+      function syncVisualEncodingState() {
+        visualEncodings = currentVisualEncodings();
+      }
+
+      function updateEncodingRangeDefaults(row) {
+        const channel = row.querySelector("[data-encoding-field='channel']").value;
+        const definition = visualChannelDefinitions[channel];
+        const minInput = row.querySelector("[data-encoding-field='min']");
+        const maxInput = row.querySelector("[data-encoding-field='max']");
+        minInput.type = definition.kind === "color" ? "color" : "number";
+        maxInput.type = definition.kind === "color" ? "color" : "number";
+        minInput.step = definition.step;
+        maxInput.step = definition.step;
+        minInput.value = String(definition.min);
+        maxInput.value = String(definition.max);
+      }
+
+      async function loadSelectedDataset() {
+        const datasetName = datasetSelect.value;
+        if (!datasetName) {
+          seedEditableDataset("No dataset selected. Using an editable sample.");
+          return;
+        }
+
+        try {
+          const response = await fetchDataset(datasetFileUrl(datasetName));
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const text = await response.text();
+          const parsed = parseDatasetText(text, datasetName);
+          setDataset(parsed.columns, parsed.rows, `Loaded ${datasetName}.`);
+          datasetSpecActive = false;
+          applyDatasetImageMarks(true);
+        } catch (error) {
+          setDataStatus(`Could not load ${datasetName}: ${error.message}`);
+        }
+      }
+
+      function parseDatasetText(text, datasetName) {
+        if (datasetName.toLowerCase().endsWith(".json")) {
+          return parseJsonDataset(text);
+        }
+        const delimiter = datasetName.toLowerCase().endsWith(".tsv")
+          ? "\t"
+          : detectDelimiter(text);
+        return recordsFromMatrix(parseDelimited(text, delimiter));
+      }
+
+      function parseJsonDataset(text) {
+        const parsed = JSON.parse(text);
+        let values = parsed;
+        if (!Array.isArray(values) && values && typeof values === "object") {
+          values = parsed.values || parsed.data || parsed.rows || [parsed];
+        }
+        if (!Array.isArray(values)) {
+          values = [values];
+        }
+        if (values.every((row) => Array.isArray(row))) {
+          return recordsFromMatrix(values);
+        }
+        if (values.every((row) => row && typeof row === "object")) {
+          return normaliseRecords(values);
+        }
+        return normaliseRecords(values.map((value, index) => ({ index: index + 1, value })));
+      }
+
+      function recordsFromMatrix(matrix) {
+        const rows = matrix.filter((row) => row.some((cell) => String(cell).trim() !== ""));
+        if (rows.length === 0) {
+          return { columns: [], rows: [] };
+        }
+
+        const used = [];
+        const columns = rows[0].map((name, index) => {
+          const base = String(name || "").trim() || `Column ${index + 1}`;
+          let candidate = base;
+          let suffix = 2;
+          while (used.map((column) => column.toLowerCase()).includes(candidate.toLowerCase())) {
+            candidate = `${base}_${suffix}`;
+            suffix += 1;
+          }
+          used.push(candidate);
+          return candidate;
+        });
+
+        const records = rows.slice(1).map((row) => {
+          const record = {};
+          columns.forEach((column, index) => {
+            record[column] = stringifyDatasetValue(row[index]);
+          });
+          return record;
+        });
+        return { columns, rows: records };
+      }
+
+      function normaliseRecords(records) {
+        const columns = [];
+        records.forEach((record) => {
+          Object.keys(record).forEach((key) => {
+            if (!columns.includes(key)) {
+              columns.push(key);
+            }
+          });
+        });
+        const rows = records.map((record) => {
+          const row = {};
+          columns.forEach((column) => {
+            row[column] = stringifyDatasetValue(record[column]);
+          });
+          return row;
+        });
+        return { columns, rows };
+      }
+
+      function detectDelimiter(text) {
+        const firstLine = text.split(/\r?\n/).find((line) => line.trim() !== "") || "";
+        const candidates = [",", ";", "\t"];
+        return candidates
+          .map((delimiter) => ({ delimiter, count: countDelimiter(firstLine, delimiter) }))
+          .sort((a, b) => b.count - a.count)[0].delimiter;
+      }
+
+      function countDelimiter(line, delimiter) {
+        let count = 0;
+        let quoted = false;
+        for (let index = 0; index < line.length; index += 1) {
+          const char = line[index];
+          if (char === '"') {
+            quoted = !quoted;
+          } else if (!quoted && char === delimiter) {
+            count += 1;
+          }
+        }
+        return count;
+      }
+
+      function parseDelimited(text, delimiter) {
+        const rows = [];
+        let row = [];
+        let value = "";
+        let quoted = false;
+
+        for (let index = 0; index < text.length; index += 1) {
+          const char = text[index];
+          if (quoted) {
+            if (char === '"' && text[index + 1] === '"') {
+              value += '"';
+              index += 1;
+            } else if (char === '"') {
+              quoted = false;
+            } else {
+              value += char;
+            }
+          } else if (char === '"') {
+            quoted = true;
+          } else if (char === delimiter) {
+            row.push(value);
+            value = "";
+          } else if (char === "\n" || char === "\r") {
+            row.push(value);
+            rows.push(row);
+            row = [];
+            value = "";
+            if (char === "\r" && text[index + 1] === "\n") {
+              index += 1;
+            }
+          } else {
+            value += char;
+          }
+        }
+
+        if (value !== "" || row.length > 0 || text.endsWith(delimiter)) {
+          row.push(value);
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      function renderDataTable() {
+        dataTable.innerHTML = "";
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        const corner = document.createElement("th");
+        corner.className = "row-header";
+        corner.textContent = "#";
+        headerRow.appendChild(corner);
+
+        datasetColumns.forEach((column, index) => {
+          const th = document.createElement("th");
+          th.contentEditable = "true";
+          th.dataset.headerIndex = String(index);
+          th.spellcheck = false;
+          th.textContent = column;
+          th.title = column;
+          headerRow.appendChild(th);
+        });
+
+        thead.appendChild(headerRow);
+        dataTable.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        datasetRows.forEach((row, rowIndex) => {
+          const tr = document.createElement("tr");
+          const rowHeader = document.createElement("th");
+          rowHeader.className = "row-header";
+          rowHeader.textContent = String(rowIndex + 1);
+          tr.appendChild(rowHeader);
+
+          datasetColumns.forEach((column, columnIndex) => {
+            const td = document.createElement("td");
+            td.contentEditable = "true";
+            td.dataset.rowIndex = String(rowIndex);
+            td.dataset.columnIndex = String(columnIndex);
+            td.spellcheck = false;
+            td.textContent = stringifyDatasetValue(row[column]);
+            td.title = td.textContent;
+            tr.appendChild(td);
+          });
+
+          tbody.appendChild(tr);
+        });
+        dataTable.appendChild(tbody);
+        updateDataCount();
+
+        if (pendingFocus) {
+          const focus = pendingFocus;
+          pendingFocus = null;
+          requestAnimationFrame(() => focusGridCell(focus.rowIndex, focus.columnIndex, focus.header));
+        }
+      }
+
+      function renameColumn(columnIndex, rawName) {
+        const previousChannels = selectedChannels();
+        const previousImageSettings = selectedImageSettings();
+        const oldName = datasetColumns[columnIndex];
+        const newName = uniqueColumnName(rawName, columnIndex);
+        if (newName === oldName) {
+          renderDataTable();
+          return;
+        }
+        datasetColumns[columnIndex] = newName;
+        datasetRows.forEach((row) => {
+          row[newName] = row[oldName] || "";
+          delete row[oldName];
+        });
+        Object.keys(previousChannels).forEach((channel) => {
+          if (previousChannels[channel] === oldName) {
+            previousChannels[channel] = newName;
+          }
+        });
+        visualEncodings = visualEncodings.map((encoding) => (
+          encoding.attribute === oldName ? { ...encoding, attribute: newName } : encoding
+        ));
+        if (previousImageSettings.valueColumn === oldName) {
+          previousImageSettings.valueColumn = newName;
+        }
+        renderChannelSelectors(previousChannels);
+        renderImageSourceControls(previousImageSettings);
+        renderVisualEncodings();
+        pendingFocus = { rowIndex: 0, columnIndex, header: true };
+        renderDataTable();
+        queueDatasetSpecRefresh();
+      }
+
+      function addDataRow(render = true) {
+        datasetRows.push(blankDataRow());
+        if (render) {
+          pendingFocus = { rowIndex: datasetRows.length - 1, columnIndex: 0, header: false };
+          renderDataTable();
+          queueDatasetSpecRefresh();
+        }
+      }
+
+      function addDataColumn(name = "") {
+        const requestedName = name || window.prompt("Column name", `Column ${datasetColumns.length + 1}`);
+        if (requestedName === null) {
+          return;
+        }
+        const columnName = uniqueColumnName(requestedName);
+        if (!columnName) {
+          return;
+        }
+        const previousChannels = selectedChannels();
+        const previousImageSettings = selectedImageSettings();
+        datasetColumns.push(columnName);
+        datasetRows.forEach((row) => {
+          row[columnName] = "";
+        });
+        renderChannelSelectors(previousChannels);
+        renderImageSourceControls(previousImageSettings);
+        renderVisualEncodings();
+        pendingFocus = { rowIndex: 0, columnIndex: datasetColumns.length - 1, header: true };
+        renderDataTable();
+        queueDatasetSpecRefresh();
+      }
+
+      function focusGridCell(rowIndex, columnIndex, header = false) {
+        const selector = header
+          ? `[data-header-index="${columnIndex}"]`
+          : `[data-row-index="${rowIndex}"][data-column-index="${columnIndex}"]`;
+        const cell = dataTable.querySelector(selector);
+        if (!cell) {
+          return;
+        }
+        cell.focus();
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      function handleDataTableInput(event) {
+        const cell = event.target.closest("td[data-row-index][data-column-index]");
+        if (!cell) {
+          return;
+        }
+        const rowIndex = Number(cell.dataset.rowIndex);
+        const columnIndex = Number(cell.dataset.columnIndex);
+        const column = datasetColumns[columnIndex];
+        datasetRows[rowIndex][column] = cell.textContent;
+        cell.title = cell.textContent;
+        if (imageSourceModeSelect.value === "value-map" && column === imageValueColumnSelect.value) {
+          renderImageSourceControls(selectedImageSettings());
+        }
+        queueDatasetSpecRefresh();
+      }
+
+      function handleDataTableBlur(event) {
+        const header = event.target.closest("th[data-header-index]");
+        if (!header) {
+          return;
+        }
+        renameColumn(Number(header.dataset.headerIndex), header.textContent);
+      }
+
+      function handleDataTableKeydown(event) {
+        const header = event.target.closest("th[data-header-index]");
+        const cell = event.target.closest("td[data-row-index][data-column-index]");
+        if (!header && !cell) {
+          return;
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (header) {
+            renameColumn(Number(header.dataset.headerIndex), header.textContent);
+            pendingFocus = { rowIndex: 0, columnIndex: Number(header.dataset.headerIndex), header: false };
+            renderDataTable();
+            return;
+          }
+          const rowIndex = Number(cell.dataset.rowIndex);
+          const columnIndex = Number(cell.dataset.columnIndex);
+          if (rowIndex + 1 >= datasetRows.length) {
+            addDataRow(false);
+            pendingFocus = { rowIndex: rowIndex + 1, columnIndex, header: false };
+            renderDataTable();
+          } else {
+            focusGridCell(rowIndex + 1, columnIndex);
+          }
+        }
+
+        if (event.key === "Tab") {
+          event.preventDefault();
+          const columnIndex = Number((header || cell).dataset.headerIndex || cell.dataset.columnIndex);
+          const rowIndex = cell ? Number(cell.dataset.rowIndex) : -1;
+          let nextRow = rowIndex;
+          let nextColumn = columnIndex + (event.shiftKey ? -1 : 1);
+          if (nextColumn >= datasetColumns.length) {
+            nextColumn = 0;
+            nextRow += 1;
+          }
+          if (nextColumn < 0) {
+            nextColumn = datasetColumns.length - 1;
+            nextRow -= 1;
+          }
+          let addedRow = false;
+          if (nextRow >= datasetRows.length) {
+            addDataRow(false);
+            nextRow = datasetRows.length - 1;
+            addedRow = true;
+          }
+          if (nextRow < 0) {
+            focusGridCell(0, nextColumn, true);
+          } else if (addedRow) {
+            pendingFocus = { rowIndex: nextRow, columnIndex: nextColumn, header: false };
+            renderDataTable();
+          } else {
+            focusGridCell(nextRow, nextColumn);
+          }
+        }
+      }
+
+      function handleDataTablePaste(event) {
+        const cell = event.target.closest("td[data-row-index][data-column-index]");
+        if (!cell) {
+          return;
+        }
+
+        const text = event.clipboardData.getData("text/plain");
+        if (!text || (!text.includes("\n") && !text.includes("\t"))) {
+          return;
+        }
+
+        event.preventDefault();
+        const startRow = Number(cell.dataset.rowIndex);
+        const startColumn = Number(cell.dataset.columnIndex);
+        const delimiter = text.includes("\t") ? "\t" : detectDelimiter(text);
+        const matrix = parseDelimited(text, delimiter)
+          .filter((row) => row.some((value) => String(value).trim() !== ""));
+        const maxColumns = matrix.reduce((max, row) => Math.max(max, row.length), 0);
+
+        while (datasetRows.length < startRow + matrix.length) {
+          addDataRow(false);
+        }
+        const previousChannels = selectedChannels();
+        const previousImageSettings = selectedImageSettings();
+        while (datasetColumns.length < startColumn + maxColumns) {
+          const columnName = uniqueColumnName(`Column ${datasetColumns.length + 1}`);
+          datasetColumns.push(columnName);
+          datasetRows.forEach((row) => {
+            row[columnName] = "";
+          });
+        }
+
+        matrix.forEach((row, rowOffset) => {
+          row.forEach((value, columnOffset) => {
+            const column = datasetColumns[startColumn + columnOffset];
+            datasetRows[startRow + rowOffset][column] = value;
+          });
+        });
+
+        pendingFocus = {
+          rowIndex: startRow + Math.max(0, matrix.length - 1),
+          columnIndex: startColumn + Math.max(0, maxColumns - 1),
+          header: false
+        };
+        renderChannelSelectors(previousChannels);
+        renderImageSourceControls(previousImageSettings);
+        renderVisualEncodings();
+        renderDataTable();
+        queueDatasetSpecRefresh();
+      }
+
+      function coerceDatasetValue(value) {
+        const text = String(value || "").trim();
+        if (text === "") {
+          return "";
+        }
+        if (/^-?(?:\d+|\d*\.\d+)$/.test(text)) {
+          return Number(text);
+        }
+        if (/^(true|false)$/i.test(text)) {
+          return text.toLowerCase() === "true";
+        }
+        return text;
+      }
+
+      function currentDatasetValues() {
+        return datasetRows
+          .filter((row) => datasetColumns.some((column) => String(row[column] || "").trim() !== ""))
+          .map((row) => {
+            const record = {};
+            datasetColumns.forEach((column) => {
+              record[column] = coerceDatasetValue(row[column]);
+            });
+            return record;
+          });
+      }
+
+      function findDatasetColumn(candidates) {
+        const wanted = candidates.map((candidate) => candidate.toLowerCase());
+        return datasetColumns.find((column) => wanted.includes(column.toLowerCase())) || null;
+      }
+
+      function encodedVisualValue(encoding, row, allRows) {
+        const definition = visualChannelDefinitions[encoding.channel];
+        const rawValue = row[encoding.attribute];
+        if (definition.kind === "color") {
+          return encodedColorValue(encoding, rawValue, allRows);
+        }
+        return encodedNumericValue(encoding, rawValue, allRows);
+      }
+
+      function encodedNumericValue(encoding, rawValue, allRows) {
+        const outMin = Number(encoding.min);
+        const outMax = Number(encoding.max);
+        const low = Number.isFinite(outMin) ? outMin : Number(visualChannelDefinitions[encoding.channel].min);
+        const high = Number.isFinite(outMax) ? outMax : Number(visualChannelDefinitions[encoding.channel].max);
+        if (encoding.type === "category") {
+          const categories = uniqueValues(allRows, encoding.attribute);
+          const index = Math.max(0, categories.indexOf(String(rawValue || "")));
+          const ratio = categories.length <= 1 ? 0 : index / (categories.length - 1);
+          return low + ratio * (high - low);
+        }
+
+        const numericValues = allRows
+          .map((row) => coerceDatasetValue(row[encoding.attribute]))
+          .filter((value) => typeof value === "number" && Number.isFinite(value));
+        const min = Math.min(...numericValues);
+        const max = Math.max(...numericValues);
+        const numericValue = coerceDatasetValue(rawValue);
+        if (typeof numericValue !== "number" || !Number.isFinite(numericValue) || numericValues.length === 0 || min === max) {
+          return low;
+        }
+        return low + ((numericValue - min) / (max - min)) * (high - low);
+      }
+
+      function encodedColorValue(encoding, rawValue, allRows) {
+        const start = normalizeHexColor(encoding.min || visualChannelDefinitions[encoding.channel].min);
+        const end = normalizeHexColor(encoding.max || visualChannelDefinitions[encoding.channel].max);
+        if (encoding.type === "category") {
+          const categories = uniqueValues(allRows, encoding.attribute);
+          const index = Math.max(0, categories.indexOf(String(rawValue || "")));
+          const ratio = categories.length <= 1 ? 0 : index / (categories.length - 1);
+          return interpolateHexColor(start, end, ratio);
+        }
+
+        const numericValues = allRows
+          .map((row) => coerceDatasetValue(row[encoding.attribute]))
+          .filter((value) => typeof value === "number" && Number.isFinite(value));
+        const min = Math.min(...numericValues);
+        const max = Math.max(...numericValues);
+        const numericValue = coerceDatasetValue(rawValue);
+        if (typeof numericValue !== "number" || !Number.isFinite(numericValue) || numericValues.length === 0 || min === max) {
+          return start;
+        }
+        return interpolateHexColor(start, end, (numericValue - min) / (max - min));
+      }
+
+      function uniqueValues(rows, column) {
+        return Array.from(new Set(rows.map((row) => String(row[column] || "").trim()).filter(Boolean)));
+      }
+
+      function normalizeHexColor(value) {
+        const color = String(value || "").trim();
+        if (/^#[0-9a-f]{6}$/i.test(color)) {
+          return color;
+        }
+        return "#000000";
+      }
+
+      function interpolateHexColor(start, end, ratio) {
+        const clamped = Math.max(0, Math.min(1, ratio));
+        const startRgb = hexToRgb(start);
+        const endRgb = hexToRgb(end);
+        return rgbToHex(
+          Math.round(startRgb[0] + (endRgb[0] - startRgb[0]) * clamped),
+          Math.round(startRgb[1] + (endRgb[1] - startRgb[1]) * clamped),
+          Math.round(startRgb[2] + (endRgb[2] - startRgb[2]) * clamped)
+        );
+      }
+
+      function hexToRgb(hex) {
+        return [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+      }
+
+      function rgbToHex(red, green, blue) {
+        return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+      }
+
+      function applyVisualEncodingsToImage(row, allRows, encodings) {
+        const params = { width: 128, height: 128, fit: "cover", format: "png" };
+        let markSize = 74;
+        encodings.forEach((encoding) => {
+          const value = encodedVisualValue(encoding, row, allRows);
+          if (encoding.channel === "size") {
+            markSize = Math.max(24, Math.min(160, Number(value) || markSize));
+            params.width = Math.round(markSize * 2);
+            params.height = Math.round(markSize * 2);
+          } else if (encoding.channel === "pixelize") {
+            params.pixelize = Math.max(1, Math.round(Number(value) || 1));
+          } else if (encoding.channel === "rotate") {
+            params.rotate = Number(value).toFixed(2);
+            params.background = "transparent";
+          } else if (encoding.channel === "tint") {
+            params.tint = value;
+            params.tintStrength = 0.38;
+          } else if (encoding.channel === "recolor") {
+            params.recolor = value;
+          } else {
+            params[encoding.channel] = Number(value).toFixed(3);
+          }
+        });
+        return { params, markSize };
+      }
+
+      function buildDatasetImageMarksSpec() {
+        syncVisualEncodingState();
+        const channels = selectedChannels();
+        const activeVisualEncodings = visualEncodings.filter((encoding) => hasColumn(encoding.attribute));
+        const imageMode = imageSourceModeSelect.value;
+        const imageColumn = channels.image || findDatasetColumn(["image", "img", "url", "src", "href"]);
+        const imageValueColumn = imageValueColumnSelect.value;
+        const xColumn = hasColumn(channels.x) ? channels.x : "";
+        const yColumn = hasColumn(channels.y) ? channels.y : "";
+        const colorColumn = hasColumn(channels.color) ? channels.color : "";
+
+        if (imageMode === "column" && !imageColumn) {
+          throw new Error("Choose a column that contains image links.");
+        }
+        if (imageMode === "value-map" && !imageValueColumn) {
+          throw new Error("Choose a value column for image mapping.");
+        }
+
+        const values = currentDatasetValues()
+          .map((row, index) => {
+            const imageKey = imageMode === "value-map"
+              ? String(row[imageValueColumn] || "").trim()
+              : String(row[imageColumn] || "").trim();
+            const imageValue = imageMode === "value-map"
+              ? imageValueMappings[imageKey]
+              : imageKey;
+            return { row, index, imageKey, imageValue };
+          })
+          .filter((entry) => String(entry.imageValue || "").trim() !== "");
+        if (values.length === 0) {
+          throw new Error("The selected image source has no values to render.");
+        }
+
+        const columnsPerRow = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(values.length))));
+        const cellWidth = 156;
+        const cellHeight = 154;
+        const rowCount = Math.ceil(values.length / columnsPerRow);
+        const previewSize = previewChartSize();
+        const gridWidth = Math.max(360, Math.min(previewSize.width, columnsPerRow * cellWidth + 56));
+        const gridHeight = Math.max(260, Math.min(previewSize.height, rowCount * cellHeight + 108));
+        const width = previewSize.width;
+        const height = previewSize.height;
+        const colorDomain = colorColumn
+          ? Array.from(new Set(values.map((entry) => String(entry.row[colorColumn] || "Other"))))
+          : ["Rows"];
+        const imageLabel = imageMode === "value-map"
+          ? `image map=${imageValueColumn}`
+          : `image=${imageColumn}`;
+
+        const specValues = values.map((entry, index) => {
+          const row = { ...entry.row };
+          const encodedImage = applyVisualEncodingsToImage(entry.row, values.map((value) => value.row), activeVisualEncodings);
+          row._row = entry.index + 1;
+          row._colorValue = colorColumn ? String(entry.row[colorColumn] || "Other") : "Rows";
+          row._xValue = xColumn ? entry.row[xColumn] : "";
+          row._yValue = yColumn ? entry.row[yColumn] : "";
+          row._imageUrl = imageSourceUrl(entry.imageValue, encodedImage.params);
+          row._imageKey = entry.imageKey;
+          row._gridX = columnsPerRow <= 1
+            ? gridWidth / 2
+            : 70 + (index % columnsPerRow) * ((gridWidth - 140) / (columnsPerRow - 1));
+          row._gridY = rowCount <= 1
+            ? gridHeight / 2
+            : 82 + Math.floor(index / columnsPerRow) * ((gridHeight - 164) / (rowCount - 1));
+          row._markSize = encodedImage.markSize;
+          return row;
+        });
+        const xExpr = xColumn ? "scale('xScale', datum._xValue)" : "datum._gridX";
+        const yExpr = yColumn ? "scale('yScale', datum._yValue)" : "datum._gridY";
+        const sizeExpr = "datum._markSize";
+        const channelSummary = [
+          xColumn ? `x=${xColumn}` : "",
+          yColumn ? `y=${yColumn}` : "",
+          colorColumn ? `color=${colorColumn}` : "",
+          imageLabel,
+          activeVisualEncodings.length ? `${activeVisualEncodings.length} server visual channels` : ""
+        ].filter(Boolean).join(", ");
+        const scales = [
+          {
+            "name": "groupColor",
+            "type": "ordinal",
+            "domain": colorDomain,
+            "range": ["#0f766e", "#c2412d", "#2563eb", "#7c3aed", "#334155", "#ca8a04"]
+          }
+        ];
+        const axes = [];
+        const legends = [];
+
+        if (xColumn) {
+          const numeric = isNumericDatasetColumn(xColumn);
+          scales.push(numeric
+            ? { "name": "xScale", "type": "linear", "domain": { "data": "table", "field": "_xValue" }, "range": [82, width - 82], "nice": true, "zero": false }
+            : { "name": "xScale", "type": "point", "domain": { "data": "table", "field": "_xValue" }, "range": [82, width - 82], "padding": 0.5 });
+          axes.push({
+            "orient": "bottom",
+            "scale": "xScale",
+            "title": xColumn,
+            "labelAngle": numeric ? 0 : -35,
+            "labelLimit": 110
+          });
+        }
+
+        if (yColumn) {
+          const numeric = isNumericDatasetColumn(yColumn);
+          scales.push(numeric
+            ? { "name": "yScale", "type": "linear", "domain": { "data": "table", "field": "_yValue" }, "range": [height - 92, 88], "nice": true, "zero": false }
+            : { "name": "yScale", "type": "point", "domain": { "data": "table", "field": "_yValue" }, "range": [88, height - 104], "padding": 0.5 });
+          axes.push({
+            "orient": "left",
+            "scale": "yScale",
+            "title": yColumn,
+            "labelLimit": 120
+          });
+        }
+
+        if (colorColumn) {
+          legends.push({
+            "fill": "groupColor",
+            "title": colorColumn,
+            "orient": "right"
+          });
+        }
+
+        return {
+          "$schema": "https://vega.github.io/schema/vega/v5.json",
+          "description": "Editable dataset columns rendered as Vega image marks with selected channel encodings.",
+          "width": width,
+          "height": height,
+          "padding": 22,
+          "autosize": "pad",
+          "background": "#f8fafc",
+          "title": {
+            "text": "Dataset image marks",
+            "anchor": "start",
+            "font": "Inter, system-ui, sans-serif",
+            "fontSize": 18,
+            "fontWeight": 700,
+            "subtitle": channelSummary
+          },
+          "data": [
+            { "name": "table", "values": specValues }
+          ],
+          "scales": scales,
+          "axes": axes,
+          "legends": legends,
+          "marks": [
+            {
+              "type": "rect",
+              "from": { "data": "table" },
+              "encode": {
+                "enter": {
+                  "x": { "signal": `${xExpr} - ${sizeExpr} / 2 - 8` },
+                  "y": { "signal": `${yExpr} - ${sizeExpr} / 2 - 8` },
+                  "width": { "signal": `${sizeExpr} + 16` },
+                  "height": { "signal": `${sizeExpr} + 16` },
+                  "cornerRadius": { "value": 4 },
+                  "fill": { "scale": "groupColor", "field": "_colorValue" },
+                  "fillOpacity": { "value": 0.16 },
+                  "stroke": { "scale": "groupColor", "field": "_colorValue" },
+                  "strokeWidth": { "value": 2 }
+                }
+              }
+            },
+            {
+              "type": "image",
+              "from": { "data": "table" },
+              "encode": {
+                "enter": {
+                  "url": { "field": "_imageUrl" },
+                  "href": { "field": "_imageUrl" },
+                  "x": { "signal": xExpr },
+                  "y": { "signal": yExpr },
+                  "width": { "signal": sizeExpr },
+                  "height": { "signal": sizeExpr },
+                  "align": { "value": "center" },
+                  "baseline": { "value": "middle" },
+                  "cursor": { "value": "pointer" },
+                  "tooltip": { "signal": "'x: ' + datum._xValue + ', y: ' + datum._yValue + ', color: ' + datum._colorValue + ', image: ' + datum._imageKey" }
+                }
+              }
+            }
+          ]
+        };
+      }
+
+      function applyDatasetImageMarks(quiet = false) {
+        try {
+          const spec = buildDatasetImageMarksSpec();
+          writeSpec(spec);
+          datasetSpecActive = true;
+          queueRender(0);
+          if (!quiet) {
+            setDataStatus(`Rendered ${spec.data[0].values.length} image marks with the selected channel encodings.`);
+          }
+        } catch (error) {
+          datasetSpecActive = false;
+          setDataStatus(error.message);
+          setStatus(error.message, "error");
+        }
+      }
+
+      function queueDatasetSpecRefresh() {
+        if (!datasetSpecActive) {
+          updateDataCount();
+          return;
+        }
+        clearTimeout(datasetApplyTimer);
+        datasetApplyTimer = setTimeout(() => applyDatasetImageMarks(true), 350);
+        updateDataCount();
+      }
+
+      function buildVegaImageMarksSpec(names) {
+        const first = imageAt(names, 0);
+        const second = imageAt(names, 1);
+        const third = imageAt(names, 2);
+        const values = [
+          {
+            name: "cover",
+            channel: "x, y, width, height",
+            url: imageUrl(first, { width: 320, height: 220, fit: "cover", format: "png" }),
+            x: 150,
+            y: 150,
+            w: 190,
+            h: 132,
+            angle: 0,
+            opacity: 1,
+            accent: "#0f766e"
+          },
+          {
+            name: "recolor",
+            channel: "url + color transform",
+            url: imageUrl(second, { width: 220, height: 220, fit: "cover", recolor: "#0f766e", saturation: 1.35, format: "png" }),
+            x: 392,
+            y: 150,
+            w: 144,
+            h: 144,
+            angle: -6,
+            opacity: 0.92,
+            accent: "#c2412d"
+          },
+          {
+            name: "blur",
+            channel: "opacity + processed URL",
+            url: imageUrl(third, { width: 240, height: 240, fit: "cover", blur: 1.8, tint: "#f59e0b", tintStrength: 0.22, format: "png" }),
+            x: 618,
+            y: 150,
+            w: 150,
+            h: 150,
+            angle: 4,
+            opacity: 0.78,
+            accent: "#2563eb"
+          },
+          {
+            name: "pixelize",
+            channel: "rotation + server params",
+            url: imageUrl(first, { width: 260, height: 180, fit: "cover", pixelize: 9, contrast: 1.18, format: "png" }),
+            x: 274,
+            y: 348,
+            w: 178,
+            h: 124,
+            angle: 8,
+            opacity: 0.96,
+            accent: "#7c3aed"
+          },
+          {
+            name: "mirror",
+            channel: "href + image mark",
+            url: imageUrl(second, { width: 260, height: 180, fit: "cover", mirror: 1, brightness: 1.1, format: "png" }),
+            x: 512,
+            y: 348,
+            w: 178,
+            h: 124,
+            angle: 0,
+            opacity: 1,
+            accent: "#334155"
+          }
+        ];
+
+        return {
+          "$schema": "https://vega.github.io/schema/vega/v5.json",
+          "description": "Server-generated image URLs rendered as Vega image marks with visual channels.",
+          "width": 760,
+          "height": 460,
+          "padding": 24,
+          "autosize": "pad",
+          "background": "#f8fafc",
+          "title": {
+            "text": "Image server URLs as Vega marks",
+            "anchor": "start",
+            "font": "Inter, system-ui, sans-serif",
+            "fontSize": 18,
+            "fontWeight": 700,
+            "subtitle": serverOrigin
+          },
+          "signals": [
+            {
+              "name": "hover",
+              "value": null,
+              "on": [
+                { "events": "image:mouseover", "update": "datum" },
+                { "events": "image:mouseout", "update": "null" }
+              ]
+            }
+          ],
+          "data": [
+            {
+              "name": "variants",
+              "values": values
+            }
+          ],
+          "marks": [
+            {
+              "type": "rect",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "x": { "signal": "datum.x - datum.w / 2 - 14" },
+                  "y": { "signal": "datum.y - datum.h / 2 - 14" },
+                  "width": { "signal": "datum.w + 28" },
+                  "height": { "signal": "datum.h + 70" },
+                  "cornerRadius": { "value": 6 },
+                  "fill": { "value": "#ffffff" },
+                  "stroke": { "field": "accent" }
+                },
+                "update": {
+                  "strokeWidth": { "signal": "hover && hover.name === datum.name ? 2 : 1" }
+                }
+              }
+            },
+            {
+              "type": "image",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "url": { "field": "url" },
+                  "href": { "field": "url" },
+                  "x": { "field": "x" },
+                  "y": { "field": "y" },
+                  "width": { "field": "w" },
+                  "height": { "field": "h" },
+                  "align": { "value": "center" },
+                  "baseline": { "value": "middle" },
+                  "cursor": { "value": "pointer" },
+                  "tooltip": { "signal": "datum.name + ': ' + datum.url" }
+                },
+                "update": {
+                  "angle": { "field": "angle" },
+                  "opacity": { "signal": "hover && hover.name !== datum.name ? 0.45 : datum.opacity" }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "x": { "field": "x" },
+                  "y": { "signal": "datum.y + datum.h / 2 + 28" },
+                  "align": { "value": "center" },
+                  "font": { "value": "Inter, system-ui, sans-serif" },
+                  "fontSize": { "value": 13 },
+                  "fontWeight": { "value": 700 },
+                  "fill": { "value": "#111827" },
+                  "text": { "field": "name" }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "x": { "field": "x" },
+                  "y": { "signal": "datum.y + datum.h / 2 + 47" },
+                  "align": { "value": "center" },
+                  "font": { "value": "Inter, system-ui, sans-serif" },
+                  "fontSize": { "value": 11 },
+                  "fill": { "value": "#64748b" },
+                  "limit": { "value": 180 },
+                  "text": { "field": "channel" }
+                }
+              }
+            }
+          ]
+        };
+      }
+
+      function buildVegaLiteUrlChannelsSpec(names) {
+        const first = imageAt(names, 0);
+        const second = imageAt(names, 1);
+        const third = imageAt(names, 2);
+        return {
+          "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+          "description": "Vega-Lite image mark URLs generated by the local image server.",
+          "width": 720,
+          "height": 360,
+          "background": "#f8fafc",
+          "data": {
+            "values": [
+              {
+                "variant": "original",
+                "channel": "url",
+                "rank": 1,
+                "opacity": 1,
+                "url": imageUrl(first, { width: 130, height: 130, fit: "cover", format: "png" })
+              },
+              {
+                "variant": "recolor",
+                "channel": "color",
+                "rank": 2,
+                "opacity": 0.95,
+                "url": imageUrl(second, { width: 130, height: 130, fit: "cover", recolor: "#2563eb", format: "png" })
+              },
+              {
+                "variant": "tint",
+                "channel": "opacity",
+                "rank": 3,
+                "opacity": 0.7,
+                "url": imageUrl(third, { width: 130, height: 130, fit: "cover", tint: "#c2412d", tintStrength: 0.34, format: "png" })
+              },
+              {
+                "variant": "pixelize",
+                "channel": "texture",
+                "rank": 4,
+                "opacity": 0.9,
+                "url": imageUrl(first, { width: 130, height: 130, fit: "cover", pixelize: 8, format: "png" })
+              },
+              {
+                "variant": "mirror",
+                "channel": "shape",
+                "rank": 5,
+                "opacity": 1,
+                "url": imageUrl(second, { width: 130, height: 130, fit: "cover", mirror: 1, rotate: 8, background: "transparent", format: "png" })
+              }
+            ]
+          },
+          "mark": {
+            "type": "image",
+            "width": 104,
+            "height": 104
+          },
+          "encoding": {
+            "x": {
+              "field": "channel",
+              "type": "nominal",
+              "sort": ["url", "color", "opacity", "texture", "shape"],
+              "axis": { "title": null, "labelAngle": 0 }
+            },
+            "y": {
+              "field": "rank",
+              "type": "ordinal",
+              "axis": { "title": "visual channel", "labels": false, "ticks": false }
+            },
+            "url": { "field": "url", "type": "nominal" },
+            "opacity": {
+              "field": "opacity",
+              "type": "quantitative",
+              "scale": { "domain": [0.45, 1] },
+              "legend": { "title": "mark opacity" }
+            },
+            "tooltip": [
+              { "field": "variant", "type": "nominal" },
+              { "field": "channel", "type": "nominal" },
+              { "field": "url", "type": "nominal" }
+            ]
+          },
+          "config": {
+            "view": { "stroke": null },
+            "axis": {
+              "grid": false,
+              "labelFont": "Inter, system-ui, sans-serif",
+              "titleFont": "Inter, system-ui, sans-serif"
+            }
+          }
+        };
+      }
+
+      function buildVegaParameterMatrixSpec(names) {
+        const first = imageAt(names, 0);
+        const second = imageAt(names, 1);
+        const third = imageAt(names, 2);
+        const columns = { resize: 140, color: 390, texture: 640 };
+        const rows = [128, 246];
+        const data = [
+          ["resize", "96 px", first, { width: 96, height: 96, fit: "cover", format: "png" }, 96, 96, 1, 0],
+          ["resize", "144 px", first, { width: 144, height: 144, fit: "cover", format: "png" }, 124, 124, 1, 1],
+          ["color", "sepia", second, { width: 128, height: 128, fit: "cover", sepia: 1, format: "png" }, 112, 112, 0.98, 0],
+          ["color", "invert", second, { width: 128, height: 128, fit: "cover", invert: 1, format: "png" }, 112, 112, 0.9, 1],
+          ["texture", "blur", third, { width: 128, height: 128, fit: "cover", blur: 2.2, format: "png" }, 112, 112, 0.8, 0],
+          ["texture", "pixelize", third, { width: 128, height: 128, fit: "cover", pixelize: 10, format: "png" }, 112, 112, 1, 1]
+        ].map(([group, label, image, params, w, h, opacity, row]) => ({
+          group,
+          label,
+          url: imageUrl(image, params),
+          x: columns[group],
+          y: rows[row],
+          w,
+          h,
+          opacity
+        }));
+
+        return {
+          "$schema": "https://vega.github.io/schema/vega/v5.json",
+          "description": "A Vega matrix where visual channels are backed by image-server query parameters.",
+          "width": 780,
+          "height": 340,
+          "padding": 22,
+          "background": "#ffffff",
+          "data": [
+            { "name": "variants", "values": data },
+            {
+              "name": "groups",
+              "source": "variants",
+              "transform": [
+                { "type": "aggregate", "groupby": ["group"], "fields": ["x"], "ops": ["mean"], "as": ["x"] }
+              ]
+            }
+          ],
+          "scales": [
+            {
+              "name": "groupColor",
+              "type": "ordinal",
+              "domain": ["resize", "color", "texture"],
+              "range": ["#0f766e", "#c2412d", "#2563eb"]
+            }
+          ],
+          "marks": [
+            {
+              "type": "text",
+              "from": { "data": "groups" },
+              "encode": {
+                "enter": {
+                  "x": { "field": "x" },
+                  "y": { "value": 34 },
+                  "align": { "value": "center" },
+                  "font": { "value": "Inter, system-ui, sans-serif" },
+                  "fontSize": { "value": 14 },
+                  "fontWeight": { "value": 700 },
+                  "fill": { "scale": "groupColor", "field": "group" },
+                  "text": { "field": "group" }
+                }
+              }
+            },
+            {
+              "type": "image",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "url": { "field": "url" },
+                  "x": { "field": "x" },
+                  "y": { "field": "y" },
+                  "width": { "field": "w" },
+                  "height": { "field": "h" },
+                  "align": { "value": "center" },
+                  "baseline": { "value": "middle" },
+                  "tooltip": { "signal": "datum.label + ': ' + datum.url" }
+                },
+                "update": {
+                  "opacity": { "field": "opacity" }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": { "data": "variants" },
+              "encode": {
+                "enter": {
+                  "x": { "field": "x" },
+                  "y": { "signal": "datum.y + datum.h / 2 + 20" },
+                  "align": { "value": "center" },
+                  "font": { "value": "Inter, system-ui, sans-serif" },
+                  "fontSize": { "value": 12 },
+                  "fill": { "value": "#475569" },
+                  "text": { "field": "label" }
+                }
+              }
+            }
+          ]
+        };
+      }
+
+      async function boot() {
+        originLine.textContent = `Server image URLs from ${serverOrigin} become Vega marks, channels, and tooltips.`;
+        serverPill.textContent = serverOrigin;
+        serverPill.title = serverOrigin;
+        document.getElementById("imagesLink").href = new URL("images", baseUrl).toString();
+        document.getElementById("dataLink").href = new URL("data", baseUrl).toString();
+        document.getElementById("helpLink").href = serverOrigin;
+        installExamples();
+        await loadImages();
+        await loadDatasets();
+        renderImageStrip();
+        applyDatasetImageMarks(true);
+      }
+
+      exampleSelect.addEventListener("change", loadSelectedExample);
+      runBtn.addEventListener("click", renderSpec);
+      editor.addEventListener("input", () => {
+        datasetSpecActive = false;
+        queueRender();
+      });
+      resetBtn.addEventListener("click", loadSelectedExample);
+      formatBtn.addEventListener("click", () => {
+        try {
+          writeSpec(parseSpec());
+          queueRender(0);
+        } catch (error) {
+          setStatus(`JSON error: ${error.message}`, "error");
+        }
+      });
+      copyBtn.addEventListener("click", copySpec);
+      loadDatasetBtn.addEventListener("click", loadSelectedDataset);
+      useImageMarksBtn.addEventListener("click", () => applyDatasetImageMarks(false));
+      addVisualChannelBtn.addEventListener("click", () => addVisualEncoding());
+      Object.values(channelSelects).forEach((select) => {
+        select.addEventListener("change", () => applyDatasetImageMarks(false));
+      });
+      imageSourceModeSelect.addEventListener("change", () => {
+        renderImageSourceControls(selectedImageSettings());
+        applyDatasetImageMarks(false);
+      });
+      imageValueColumnSelect.addEventListener("change", () => {
+        renderImageSourceControls(selectedImageSettings());
+        applyDatasetImageMarks(false);
+      });
+      imageMap.addEventListener("change", (event) => {
+        const select = event.target.closest("select[data-image-map-value]");
+        if (!select) {
+          return;
+        }
+        imageValueMappings[select.dataset.imageMapValue] = select.value;
+        applyDatasetImageMarks(false);
+      });
+      visualChannelList.addEventListener("change", (event) => {
+        const row = event.target.closest(".visual-channel-row");
+        if (!row) {
+          return;
+        }
+        if (event.target.dataset.encodingField === "channel") {
+          updateEncodingRangeDefaults(row);
+        }
+        syncVisualEncodingState();
+        applyDatasetImageMarks(false);
+      });
+      visualChannelList.addEventListener("input", () => {
+        syncVisualEncodingState();
+        queueDatasetSpecRefresh();
+      });
+      visualChannelList.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-encoding-remove]");
+        if (!button) {
+          return;
+        }
+        const id = Number(button.dataset.encodingRemove);
+        visualEncodings = visualEncodings.filter((encoding) => encoding.id !== id);
+        renderVisualEncodings();
+        applyDatasetImageMarks(false);
+      });
+      addDataRowBtn.addEventListener("click", () => addDataRow(true));
+      addDataColumnBtn.addEventListener("click", () => addDataColumn());
+      dataTable.addEventListener("input", handleDataTableInput);
+      dataTable.addEventListener("focusout", handleDataTableBlur);
+      dataTable.addEventListener("keydown", handleDataTableKeydown);
+      dataTable.addEventListener("paste", handleDataTablePaste);
+      autoRender.addEventListener("change", () => {
+        if (autoRender.checked) {
+          queueRender(0);
+        }
+      });
+      window.addEventListener("resize", () => {
+        if (datasetSpecActive) {
+          queueDatasetSpecRefresh();
+        }
+      });
+
+      boot();
+    })();
+  </script>
+</body>
+</html>

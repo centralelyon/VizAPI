@@ -7,7 +7,6 @@ class User(BaseModel):
     id: int
     github_id: int
     username: str
-    email: str | None
     avatar_url: str | None
     created_at: datetime
 
