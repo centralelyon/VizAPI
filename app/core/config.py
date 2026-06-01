@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
     DATA_PATH_MODULES: str = "./data/modules/"
 
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+
 
 def construct_settings() -> Settings:
     """Returns the production settings"""

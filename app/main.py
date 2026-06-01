@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import construct_settings
 from app.module import all_modules
 from app.shared.db.database import Base, engine
+from app.types.middleware import RateLimitMiddleware
+
 
 _settings = construct_settings()
 _root_path = (
@@ -49,6 +51,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_window=_settings.RATE_LIMIT_REQUESTS,
+    window_seconds=_settings.RATE_LIMIT_WINDOW_SECONDS,
 )
 
 for module in all_modules:
