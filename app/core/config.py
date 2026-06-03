@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 60
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
+    OWNCLOUD_DOMAIN: str = "http://localhost:8080"
+    OWNCLOUD_ADMIN_USERNAME: str = "admin"
+    OWNCLOUD_ADMIN_PASSWORD: str = "admin"
+
 
 def construct_settings() -> Settings:
     """Returns the production settings"""

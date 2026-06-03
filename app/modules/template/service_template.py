@@ -3,10 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.template import (
     models_template,
+    repositories_cloud_template,
     repositories_db_template,
     repositories_file_template,
     schemas_template,
 )
+from app.shared.db.owncloud import OwnCloudClient
 
 
 def read_file() -> dict:
@@ -21,7 +23,9 @@ async def get_all_items(db: AsyncSession) -> list[models_template.TemplateItem]:
     return await repositories_db_template.get_all(db)
 
 
-async def get_item(db: AsyncSession, item_id: int) -> models_template.TemplateItem | None:
+async def get_item(
+    db: AsyncSession, item_id: int
+) -> models_template.TemplateItem | None:
     return await repositories_db_template.get_by_id(db, item_id)
 
 
@@ -62,3 +66,36 @@ async def list_files(
     db: AsyncSession,
 ) -> list[models_template.UploadedFile]:
     return await repositories_db_template.get_all_files(db)
+
+
+async def list_cloud_folder(cloud: OwnCloudClient, path: str) -> list[dict[str, str]]:
+    return await repositories_cloud_template.list_folder(cloud, path)
+
+
+async def upload_cloud_file(
+    cloud: OwnCloudClient, path: str, file: UploadFile
+) -> dict[str, object]:
+    content = await file.read()
+    await repositories_cloud_template.upload(cloud, path, content)
+    return {"uploaded": path, "size": len(content)}
+
+
+async def download_cloud_file(cloud: OwnCloudClient, path: str) -> tuple[bytes, str]:
+    content = await repositories_cloud_template.download(cloud, path)
+    filename = path.rsplit("/", 1)[-1]
+    return content, filename
+
+
+async def delete_cloud_file(cloud: OwnCloudClient, path: str) -> None:
+    await repositories_cloud_template.delete(cloud, path)
+
+
+# async def share_cloud_file(
+#     cloud: OwnCloudClient, path: str
+# ) -> schemas_template.OwnCloudShareRead:
+#     result = await repositories_cloud_template.create_share(cloud, path)
+#     ocs_data = (result.get("ocs") or {}).get("data") or {}
+#     return schemas_template.OwnCloudShareRead(
+#         url=str(ocs_data.get("url", "")),
+#         token=str(ocs_data.get("token", "")),
+#     )

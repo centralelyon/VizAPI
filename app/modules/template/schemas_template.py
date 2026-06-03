@@ -22,3 +22,16 @@ class UploadedFileRead(BaseModel):
     size: int
     uploaded_at: datetime
     model_config = {"from_attributes": True}
+
+
+class OwnCloudEntryRead(BaseModel):
+    href: str
+    name: str
+    type: str
+    last_modified: str
+    size: str
+
+
+class OwnCloudShareRead(BaseModel):
+    url: str
+    token: str
