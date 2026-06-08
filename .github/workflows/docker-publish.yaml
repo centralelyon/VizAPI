@@ -3,15 +3,15 @@ name: Push Docker Image to GHCR
 on:
   push:
     branches:
-      - main # On each push to main
+      - main
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    
+
     permissions:
       contents: read
-      packages: write 
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -29,4 +29,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/vizapi:latest # later can add version tags as well
+          tags: ghcr.io/${{ github.repository_owner }}/vizapi:latest
+
