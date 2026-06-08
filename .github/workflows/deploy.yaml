@@ -3,7 +3,7 @@ name: Deploy
 on:
   workflow_run:
     workflows:
-      - Trigger deployment webhook
+      - Push Docker Image to GHCR
     types:
       - completed
     branches:
