@@ -21,11 +21,9 @@ jobs:
           WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
           COMMIT_ID: ${{ github.event.workflow_run.head_sha }}
           COMMIT_AUTHOR: ${{ github.event.workflow_run.head_commit.author.name }}
-          COMMIT_EMAIL: ${{ github.event.workflow_run.head_commit.author.email }}
-          COMMIT_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
         run: |
-          PAYLOAD=$(printf '{"ref":"refs/heads/main","after":"%s","head_commit":{"id":"%s","message":"%s","author":{"name":"%s","email":"%s"}}}' \
-            "$COMMIT_ID" "$COMMIT_ID" "$COMMIT_MESSAGE" "$COMMIT_AUTHOR" "$COMMIT_EMAIL")
+          PAYLOAD=$(printf '{"ref":"refs/heads/main","after":"%s","head_commit":{"id":"%s","author":{"name":"%s"}}}' \
+            "$COMMIT_ID" "$COMMIT_ID" "$COMMIT_AUTHOR")
           SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | awk '{print $2}')
           curl -f -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
