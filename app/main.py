@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import construct_settings
-from app.module import all_modules
+from app.core.security.basic_auth import require_basic_auth
+from app.module import core_modules, module_list
 from app.shared.db.database import Base, engine
 from app.types.middleware import RateLimitMiddleware
 
@@ -21,7 +22,7 @@ _root_path = (
 def _ensure_module_data_dirs() -> None:
     required_dirs = [
         directory
-        for module in all_modules
+        for module in [*core_modules, *module_list]
         for directory in getattr(module, "data_dirs", [])
     ]
     for directory in required_dirs:
@@ -59,7 +60,16 @@ app.add_middleware(
     window_seconds=_settings.RATE_LIMIT_WINDOW_SECONDS,
 )
 
-for module in all_modules:
+for module in core_modules:
     app.include_router(module.router, prefix=f"/{module.root}")
+    for path, sub_app, name in getattr(module, "mounts", []):
+        app.mount(f"/{module.root}{path}", sub_app, name=name)
+
+for module in module_list:
+    app.include_router(
+        module.router,
+        prefix=f"/{module.root}",
+        # dependencies=[Depends(require_basic_auth)],
+    )
     for path, sub_app, name in getattr(module, "mounts", []):
         app.mount(f"/{module.root}{path}", sub_app, name=name)

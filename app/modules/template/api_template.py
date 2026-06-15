@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import construct_settings
 from app.modules.template import schemas_template, service_template
 from app.shared.db.database import get_db
-from app.shared.db.owncloud import OwnCloudClient, get_cloud
+from app.shared.db.owncloud import OwnCloudClient, get_user_cloud
 from app.types.module import Module
 
 root = "template"  # Set the root path for the module every routes will be prefixed with this
@@ -119,7 +119,7 @@ async def download_file(file_id: int, db: AsyncSession = Depends(get_db)):
 )
 async def cloud_list(
     path: str = Query(default="/", description="Folder path on OwnCloud"),
-    cloud: OwnCloudClient = Depends(get_cloud),
+    cloud: OwnCloudClient = Depends(get_user_cloud),
 ):
     try:
         return await service_template.list_cloud_folder(cloud, path)
@@ -133,7 +133,7 @@ async def cloud_upload(
     path: str = Query(
         description="Destination path on OwnCloud, e.g. /uploads/file.txt"
     ),
-    cloud: OwnCloudClient = Depends(get_cloud),
+    cloud: OwnCloudClient = Depends(get_user_cloud),
 ):
     try:
         return await service_template.upload_cloud_file(cloud, path, file)
@@ -147,7 +147,7 @@ async def cloud_upload(
 )
 async def cloud_download(
     path: str = Query(description="File path on OwnCloud, e.g. /uploads/file.txt"),
-    cloud: OwnCloudClient = Depends(get_cloud),
+    cloud: OwnCloudClient = Depends(get_user_cloud),
 ):
     try:
         content, filename = await service_template.download_cloud_file(cloud, path)
@@ -166,7 +166,7 @@ async def cloud_download(
 )
 async def cloud_delete(
     path: str = Query(description="File or folder path on OwnCloud"),
-    cloud: OwnCloudClient = Depends(get_cloud),
+    cloud: OwnCloudClient = Depends(get_user_cloud),
 ):
     try:
         await service_template.delete_cloud_file(cloud, path)
@@ -181,7 +181,7 @@ async def cloud_delete(
 # )
 # async def cloud_share(
 #     path: str = Query(description="Path to share on OwnCloud"),
-#     cloud: OwnCloudClient = Depends(get_cloud),
+#     cloud: OwnCloudClient = Depends(get_user_cloud),
 # ):
 #     try:
 #         return await service_template.share_cloud_file(cloud, path)

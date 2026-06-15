@@ -13,3 +13,8 @@ __pycache__/
 site/
 
 vizapi-data/
+
+graphify-out/
+
+.claude/
+CLAUDE.md

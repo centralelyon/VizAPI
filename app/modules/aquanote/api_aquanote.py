@@ -59,5 +59,8 @@ async def get_data(compet_id: str, run_id: str):
     "/getQuality/{compet_id}/{run_id}",
     status_code=200,
 )
-async def get_quality(compet_id: str, run_id: str):
+async def get_quality(
+    compet_id: str,
+    run_id: str,
+):
     return aquanote_service.get_quality(compet_id, run_id)
