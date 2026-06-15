@@ -2,7 +2,10 @@ from typing import AsyncGenerator
 from xml.etree import ElementTree as ET
 
 import httpx
+from fastapi import Depends
+from fastapi.security import HTTPBasicCredentials
 
+from app.core.security.basic_auth import require_basic_auth
 from app.core.utils.settings import get_settings
 
 _DAV_NS = {"d": "DAV:"}
@@ -98,6 +101,21 @@ async def get_cloud() -> AsyncGenerator[OwnCloudClient, None]:
         base_url=settings.OWNCLOUD_DOMAIN,
         username=settings.OWNCLOUD_ADMIN_USERNAME,
         password=settings.OWNCLOUD_ADMIN_PASSWORD,
+    )
+    try:
+        yield client
+    finally:
+        await client.close()
+
+
+async def get_user_cloud(
+    credentials: HTTPBasicCredentials = Depends(require_basic_auth),
+) -> AsyncGenerator[OwnCloudClient, None]:
+    settings = get_settings()
+    client = OwnCloudClient(
+        base_url=settings.OWNCLOUD_DOMAIN,
+        username=credentials.username,
+        password=credentials.password,
     )
     try:
         yield client

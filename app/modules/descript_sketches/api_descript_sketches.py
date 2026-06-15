@@ -1,7 +1,8 @@
+from app.core.security.basic_auth import require_basic_auth
 from pathlib import Path
 from typing import Any
 
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Depends
 
 from app.core.config import construct_settings
 from app.types.module import Module
@@ -35,6 +36,7 @@ async def get_palettes():
 )
 async def create_palette(
     file: UploadFile = File(...),
+    user: str = Depends(require_basic_auth),
 ):
     """Upload a new palette file. The file should be a JSON file containing the palette data."""
     return services_descript_sketches.upload_palette(file)
@@ -58,6 +60,7 @@ async def get_palette(
 )
 async def delete_palette(
     name: str,
+    user: str = Depends(require_basic_auth),
 ):
     """Delete a specific palette by name."""
     return services_descript_sketches.delete_palette(name)
