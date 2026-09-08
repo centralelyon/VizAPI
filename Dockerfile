@@ -19,6 +19,16 @@ COPY pyproject.toml .
 COPY public public/
 COPY app app/
 
+
+
+# Build Decaligne LOOM / octi - by Mu
+RUN chmod +x app/modules/decaligne_code/loom/build.sh \
+    && app/modules/decaligne_code/loom/build.sh
+
+
+
+
+    
 # this is wrong
 COPY data data/ 
 
