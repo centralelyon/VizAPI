@@ -27,7 +27,24 @@ def endpoint(operation):
     return handle
 
 
-for operation in ("session", "move-node", "delete-node", "add-station", "merge-stations", 
-                  "split-station", "split-segment", "add-route", "delete-route", 
-                  "render-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"): 
-    router.add_api_route("/edit/" + operation, endpoint(operation), methods=["POST"])
+OPERATIONS = (
+    "session", "move-node", "delete-node", "add-station", "merge-stations",
+    "split-station", "split-segment", "add-route", "delete-route",
+    "render-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"
+)
+
+for operation in OPERATIONS:
+    router.add_api_route(
+        "/edit/" + operation,
+        endpoint(operation),
+        methods=["POST"],
+        include_in_schema=False,
+    )
+
+
+@router.post("/edit", summary="Edit")
+async def edit():
+    return {
+        "description": "Transit network editing API",
+        "operations": list(OPERATIONS),
+    }
