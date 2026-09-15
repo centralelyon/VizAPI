@@ -25,6 +25,26 @@ COPY app app/
 RUN chmod +x app/modules/decaligne_code/loom/build.sh \
     && app/modules/decaligne_code/loom/build.sh
 
+# Build Decaligne TransitMap C++ Core - by Mu
+RUN apt-get update && apt-get install -y \
+    g++ \
+    cmake \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cmake \
+    -S app/modules/decaligne_code/transitmap_core \
+    -B /tmp/transitmap-core-build \
+    -DTRANSIT_BUILD_DESKTOP=OFF \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/transitmap-core-build \
+    --target transitmap-core \
+    -j2 \
+    && cp /tmp/transitmap-core-build/transitmap-core /usr/local/bin/transitmap-core \
+    && rm -rf /tmp/transitmap-core-build
+
+ENV TRANSITMAP_CORE_BIN=/usr/local/bin/transitmap-core
 
 
 

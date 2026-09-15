@@ -41,7 +41,10 @@ def octi(graph: dict):
         ) from exc
 
 
-@module.router.post("/gtfs/routes")
+@module.router.post(
+    "/gtfs/routes",
+    include_in_schema=False,
+)
 async def gtfs_routes(request: Request):
     try:
         with tempfile.TemporaryDirectory() as directory:
@@ -125,3 +128,7 @@ async def gtfs(
             502,
             str(exc),
         ) from exc
+
+# Reuse this module's service, proxy path and existing VizAPI lifecycle.
+from app.modules.decaligne_code.edit_router import router as edit_router
+module.router.include_router(edit_router)
