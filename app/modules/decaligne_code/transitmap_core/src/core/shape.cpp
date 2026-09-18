@@ -1218,7 +1218,7 @@ StyledShape Shape2StyleShape(const Shape& shape) {
         edges.reserve(route.segmentIndices.size());
         std::unordered_map<int, std::vector<int>> adjacency;
         std::unordered_set<int> seenSegments;
-        for (int segIndex : route.segmentIndices) {
+        if (route.orderedNodes.empty()) for (int segIndex : route.segmentIndices) {
             if (segIndex < 0 || segIndex >= static_cast<int>(shape.segments.size())) {
                 warn(route.id, "invalid segment index " + std::to_string(segIndex));
                 continue;
@@ -1289,6 +1289,7 @@ StyledShape Shape2StyleShape(const Shape& shape) {
             };
 
         std::vector<ExtractedPath> extractedPaths;
+        if (!route.orderedNodes.empty()) extractedPaths.push_back({route.orderedNodes, route.segmentIndices});
         int consumedCount = 0;
         while (consumedCount < static_cast<int>(edges.size())) {
             int startNode = chooseStartNode();
@@ -1331,6 +1332,7 @@ StyledShape Shape2StyleShape(const Shape& shape) {
         }
 
         auto shouldKeepNode = [&](const ExtractedPath& path, int chainIndex) {
+            if (!route.orderedNodes.empty()) return true;
             if (chainIndex <= 0 || chainIndex >= static_cast<int>(path.nodes.size()) - 1) return true;
             const int node = path.nodes[chainIndex];
             if (unconsumedDegree(node) > 0) return true;
@@ -1393,6 +1395,21 @@ StyledShape Shape2StyleShape(const Shape& shape) {
         if (entry.second.size() > 1) styled.shared_indices.push_back(entry.second);
     }
 
+    // Explicit visits use their own arc-length occurrence, including return visits
+    // to an earlier coordinate. Nearest-point matching would choose the first visit.
+    for (int ri=0;ri<routeCount;++ri) {
+        const auto& nodes=shape.routes[ri].orderedNodes;
+        double total=0,along=0;
+        for(size_t i=1;i<nodes.size();++i) total+=std::sqrt(dist2(shape.nodes[nodes[i-1]].pos,shape.nodes[nodes[i]].pos));
+        for(size_t i=0;i<nodes.size();++i) {
+            const auto& n=shape.nodes[nodes[i]];
+            if(i)along+=std::sqrt(dist2(shape.nodes[nodes[i-1]].pos,n.pos));
+            if(!isStationLike(n.type))continue;
+            StyledShape::NormalStation station;station.id=std::to_string(n.id);station.station_id=n.station_id;
+            station.name=n.name;station.pos=n.pos;station.routeIndex=ri;station.pathIndex=0;
+            station.pathT=total>0?along/total:0;styled.normal_stations.push_back(station);
+        }
+    }
     for (auto& entry : stationRoutesByNode) {
         auto& routes = entry.second;
         std::sort(routes.begin(), routes.end());

@@ -83,7 +83,7 @@ class EditSessions:
     def create(self, body):
         if not isinstance(body.get("map"), dict):
             raise HTTPException(422, "map must be a GeoJSON object")
-        result = self.core({"op": "session", **{k: body[k] for k in ("map", "obstacles", "styles", "style") if k in body}})
+        result = self.core({"op": "session", **{k: body[k] for k in ("map", "obstacles", "styles", "style", "bidirectionalRoutes") if k in body}})
         result["state"]["original"] = body["map"]
         sid = uuid.uuid4().hex
         checkpoint_id = uuid.uuid4().hex
@@ -313,7 +313,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "x", "y", "snap", "name", "stationId", "offset", "styles", "style")
+        allowed = ("nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":
@@ -332,7 +332,10 @@ class EditSessions:
                     route = routes.get(str(line.get("id", "")))
                     if route:
                         line.update(name=route["name"], label=route["name"])
-            payload.update(op="replace-map", map=new_map, obstacles=state["obstacles"])
+            if "directionalData" in state:
+                new_map["transitMapDirections"] = state["directionalData"]
+                new_map["bidirectionalRoutes"] = state.get("bidirectionalRoutes", [])
+            payload.update(op="replace-map", map=new_map, obstacles=state["obstacles"], preserveRouteDirections=True)
         elif operation == "restore":
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)

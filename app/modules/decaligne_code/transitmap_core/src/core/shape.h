@@ -41,6 +41,9 @@ struct ShapeRoute {
     float route_width = 6.0f;
     float color[3];
     std::vector<int> segmentIndices;
+    // Render-only directional instance; ordinary/editable routes leave these empty.
+    std::vector<int> orderedNodes;
+    std::string logicalRouteId, directionId, patternId;
     bool isObstacle = false;
     ObstacleKind obstacleKind = ObstacleKind::Line;
 };

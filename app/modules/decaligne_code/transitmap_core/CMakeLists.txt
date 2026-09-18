@@ -19,6 +19,8 @@ add_library(TransitMapCore
     src/obs/region.cpp
     src/obs/line.cpp
 
+    src/io/route_directions.cpp
+    src/io/directional.cpp
     src/io/loader.cpp
     src/io/shape_loom_export.cpp
 )

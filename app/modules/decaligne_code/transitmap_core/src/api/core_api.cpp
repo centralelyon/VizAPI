@@ -2,6 +2,8 @@
 #include "core/shape.h"
 #include "core/projection.h"
 #include "io/loader.h"
+#include "io/directional.h"
+#include "io/route_directions.h"
 #include "io/shape_loom_export.h"
 #include "render/render_geometry.h"
 #include <algorithm>
@@ -57,7 +59,10 @@ std::string edgeKey(const Shape& s, const ShapeSegment& e) {
 // their vectors. Changed edges receive fresh IDs; deleted IDs are never reused.
 void identities(Shape& s, json& state, const Shape* before=nullptr) {
     long long counter=state.value("nextId",1LL);
-    auto fresh=[&](const char* prefix) { return std::string(prefix)+std::to_string(counter++); };
+    std::set<std::string> reserved;
+    for(const auto& n:s.nodes)reserved.insert(n.uid);
+    for(const auto& e:s.segments)reserved.insert(e.uid);
+    auto fresh=[&](const char* prefix) { std::string id;do{id=std::string(prefix)+std::to_string(counter++);}while(reserved.count(id));reserved.insert(id);return id; };
     std::set<std::string> used;
     int internal=0; for(const auto& n:s.nodes) internal=std::max(internal,n.id+1);
     for(auto& n:s.nodes) {
@@ -147,6 +152,7 @@ void validate(const Shape& s) {
         for(int e:r.segmentIndices) require(e>=0&&e<int(s.segments.size()),"Invalid route membership");
     }
 }
+std::string logicalId(const ShapeRoute& r) {return r.logicalRouteId.empty()?r.id:r.logicalRouteId;}
 void geometryStyle(StyledShape& s, const Shape& shape, const json& style) {
     require(style.is_object(),"Style must be an object");
     auto routes=style.value("routes",json::object());
@@ -154,7 +160,7 @@ void geometryStyle(StyledShape& s, const Shape& shape, const json& style) {
     const auto count=shape.routes.size(); s.route_bend_overrides.resize(count);
     std::vector<double> spacing(count,0);
     for(size_t ri=0;ri<count;++ri) {
-        const auto r=routes.value(shape.routes[ri].id,json::object());
+        const auto r=routes.value(logicalId(shape.routes[ri]),json::object());
         require(r.is_object(),"Route style must be an object");
         s.routes_width[ri]=number(r,"width",shape.routes[ri].route_width,0,1000);
         spacing[ri]=number(r,"spacing",0,-1000,1000);
@@ -174,8 +180,10 @@ void geometryStyle(StyledShape& s, const Shape& shape, const json& style) {
         s.routes_spacing[a][b]=a==b?0:(std::abs(spacing[a])>=std::abs(spacing[b])?spacing[a]:spacing[b]);
     const auto pairs=style.value("pairs",json::array()); require(pairs.is_array(),"pairs must be an array");
     for(const auto& p:pairs) {
-        const int a=routeIndex(shape,p.at("a")),b=routeIndex(shape,p.at("b"));
-        const double gap=number(p,"spacing",0,-1000,1000); s.routes_spacing[a][b]=s.routes_spacing[b][a]=a==b?0:gap;
+        const double gap=number(p,"spacing",0,-1000,1000);
+        for(size_t a=0;a<count;++a)for(size_t b=0;b<count;++b)
+            if(logicalId(shape.routes[a])==p.at("a")&&logicalId(shape.routes[b])==p.at("b"))
+                s.routes_spacing[a][b]=s.routes_spacing[b][a]=a==b?0:gap;
     }
 }
 json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, const json& topology) {
@@ -190,14 +198,19 @@ json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, co
                 commands.push_back(v);
             }
             for(auto p:display.screenRoutePaths[ri][pi]) points.push_back(point({p.x,800-p.y}));
-            paths.push_back({{"id",topology["routes"][ri]["paths"][pi]["id"]},{"commands",commands},{"points",points}});
+            json path={{"id",topology["routes"][ri]["paths"][pi]["id"]},{"commands",commands},{"points",points}};
+            if(!shape.routes[ri].logicalRouteId.empty()) {path["directionId"]=shape.routes[ri].directionId;path["patternId"]=shape.routes[ri].patternId;}
+            paths.push_back(path);
         }
-        routes.push_back({{"routeId",shape.routes[ri].id},{"width",s.routes_width[ri]},{"paths",paths}});
+        const auto id=logicalId(shape.routes[ri]);
+        auto existing=std::find_if(routes.begin(),routes.end(),[&](const auto& r){return r.at("routeId")==id;});
+        if(existing==routes.end())routes.push_back({{"routeId",id},{"width",s.routes_width[ri]},{"paths",paths}});
+        else for(const auto& path:paths)(*existing)["paths"].push_back(path);
     }
     std::map<int,std::string> nodeIds; for(const auto& n:shape.nodes) nodeIds[n.id]=n.uid;
     auto addStation=[&](const auto& st,const std::vector<int>& ris) {
         auto id=st.id.substr(0,st.id.find("_split_")); int internal=std::stoi(id);
-        json ids=json::array(); for(int ri:ris) ids.push_back(shape.routes.at(ri).id);
+        json ids=json::array(); for(int ri:ris) ids.push_back(logicalId(shape.routes.at(ri)));
         stations.push_back({{"id",st.id},{"nodeId",nodeIds.at(internal)},{"point",point(screen(camera,st.pos))},{"routeIds",ids}});
     };
     for(const auto& st:display.normalStations) addStation(st,{st.routeIndex});
@@ -268,9 +281,32 @@ Shape loadMap(json map) {
     for(const auto& f:map["features"])if(f["geometry"]["type"]=="LineString") {
         const auto& p=f["properties"];require(points.count(p.at("from"))&&points.count(p.at("to")),"LineString references a missing point");
     }
-    GeoData data; Loader::loadRoutesJson(map,data);
+    if(hasRouteDirections(map))return loadDirectedTopology(map);
+    auto loaderMap=map;
+    std::set<std::string> anchors,stationPositions;
+    if(map.contains("transitMapDirections")) {
+        // geoData2Shape snaps samples to stations. Protect explicit topology
+        // vertices too: otherwise two sides of a loop can collapse to one edge.
+        // The temporary station marker exists only inside preprocessing.
+        for(const auto& f:map["features"])if(f["geometry"]["type"]=="Point") {
+            const auto& p=f["properties"];
+            if(p.contains("station_label")||p.contains("name")||p.contains("station_id"))
+                stationPositions.insert(f["geometry"]["coordinates"].dump());
+        }
+        for(auto& f:loaderMap["features"])if(f["geometry"]["type"]=="Point") {
+            auto& p=f["properties"];
+            if(!p.contains("station_label")&&!p.contains("name")) {
+                p["station_label"]="";
+                if(!p.contains("station_id")&&!stationPositions.count(f["geometry"]["coordinates"].dump()))anchors.insert(p["id"]);
+            }
+        }
+    }
+    GeoData data; Loader::loadRoutesJson(loaderMap,data);
     std::sort(data.routes.begin(),data.routes.end(),[](const auto& a,const auto& b){return a.id<b.id;});
-    auto shape=geoData2Shape(data); require(!shape.routes.empty(),"Map contains no routes"); return shape;
+    auto shape=geoData2Shape(data); require(!shape.routes.empty(),"Map contains no routes");
+    retainMapNodeIds(shape,map);
+    for(auto& n:shape.nodes)if(anchors.count(n.uid)){n.type=ShapeNodeType::ShapePoint;n.name.clear();n.station_id.clear();}
+    return shape;
 }
 void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     if(op=="move-node") {
@@ -326,11 +362,23 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
 }
 json transitCoreRequest(const json& request) {
     const auto op=request.value("op",std::string("session"));
+    if(op=="gtfs-patterns")return {{"directionalData",gtfsDirectionalPatterns(request.at("tables"))}};
     json state=request.value("state",json::object()); Shape shape;
     if(op=="session" || op=="replace-map") {
         auto map=request.at("map"); shape=loadMap(map);
+        if(map.contains("transitMapDirections")) {
+            validateDirectionalData(map["transitMapDirections"]);
+            state["directionalData"]=map["transitMapDirections"];
+        } else state.erase("directionalData");
+        state["bidirectionalRoutes"]=map.value("bidirectionalRoutes",json::array());
         // Fresh generation after LOOM; never match new vector indices to old IDs.
         state["pathIds"]=json::object(); identities(shape,state);
+        if(request.value("preserveRouteDirections",false)) {
+            require(state.contains("shape"),"Direction remapping needs the previous Shape");
+            state["routeTraversals"]=remapRouteDirections(decode(state.at("shape")),shape,state.value("routeTraversals",json::array()));
+        } else if(hasRouteDirections(map))state["routeTraversals"]=importRouteDirections(shape,map);
+        else if(state.contains("directionalData"))state["routeTraversals"]=mapGtfsDirections(shape,state["directionalData"]);
+        else state["routeTraversals"]=json::array();
         Camera cam;cam.resize(1200,800);GeoData data;
         Route bounds;for(const auto& n:shape.nodes)bounds.segments.push_back({n.pos});data.routes.push_back(bounds);
         cam.fitToData(data);auto center=cam.screenToWorld(600,400);
@@ -351,29 +399,64 @@ json transitCoreRequest(const json& request) {
             }
             graph["coordinateSystem"]="planar";
         }
+        // OCTI consumes logical route membership once per segment. Its
+        // directions survive separately in state and are remapped on return.
+        if(op=="export")exportRouteDirections(graph,state.value("routeTraversals",json::array()));
         graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph}};
     }
-    if(op!="session" && op!="replace-map") {Shape before=shape;edit(shape,op,request,cam);identities(shape,state,&before);}
+    if(op!="session" && op!="replace-map") {
+        Shape before=shape;edit(shape,op,request,cam);identities(shape,state,&before);
+        state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op,request);
+    }
     validate(shape);
+    auto selected=request.value("bidirectionalRoutes",state.value("bidirectionalRoutes",json::array()));
+    require(selected.is_array(),"bidirectionalRoutes must be an array");
+    std::set<std::string> available,enabled;
+    if(state.contains("directionalData"))for(const auto& r:state["directionalData"]["routes"])
+        if(!r.at("patterns").empty()&&std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& s){return s.id==r.at("routeId");}))available.insert(r.at("routeId"));
+    for(const auto& id:selected) {
+        auto key=identifier(id);
+        if(available.count(key))enabled.insert(key);
+        else require(!request.contains("bidirectionalRoutes"),"Route has no directional GTFS data: "+key);
+    }
+    state["bidirectionalRoutes"]=enabled;
     auto canonical=Shape2StyleShape(shape);
     auto topology=encode(shape,cam,canonical,state);state["shape"]=topology;
     // Two comparison styles share one authoritative topology/revision.
     auto styles=request.value("styles",state.value("styles",json::object()));
     if(request.contains("style"))styles["right"]=request["style"];
     state["styles"]=styles;json scenes=json::object();
+    Shape renderShape;StyledShape renderCanonical;json renderTopology;
+    if(!enabled.empty()) {
+        renderShape=directionalRenderShape(shape,state.at("directionalData"),state["bidirectionalRoutes"]);
+        renderCanonical=Shape2StyleShape(renderShape);directionalSharedGeometry(renderShape,renderCanonical);
+        auto temporary=state;renderTopology=encode(renderShape,cam,renderCanonical,temporary);
+        // Public display membership uses the logical parent, never the instance ID.
+        std::map<std::string,std::string> parents;for(const auto& r:renderShape.routes)parents[r.id]=logicalId(r);
+        for(auto& n:renderTopology["nodes"]) {std::set<std::string> ids;for(const auto& id:n["routeIds"])ids.insert(parents.at(id));n["routeIds"]=ids;n["interchange"]=n.value("isStation",false)&&ids.size()>1;}
+    }
+    auto sceneFor=[&](const json& st) {
+        if(enabled.empty()){auto styled=canonical;geometryStyle(styled,shape,st);return rendered(shape,styled,cam,topology);}
+        auto styled=renderCanonical;geometryStyle(styled,renderShape,st);
+        auto scene=rendered(renderShape,styled,cam,renderTopology);
+        scene["displayNodes"]=json::array();
+        for(const auto& n:renderTopology["nodes"])if(!n["routeIds"].empty())scene["displayNodes"].push_back(n);
+        auto plain=renderCanonical;geometryStyle(plain,renderShape,json::object());
+        scene["geometryRoutes"]=rendered(renderShape,plain,cam,renderTopology)["routes"];
+        return scene;
+    };
     for(auto it=styles.begin();it!=styles.end();++it) {
-        auto styled=canonical;
         // Discard styles for deleted routes/pairs as part of topology updates.
         auto st=it.value(); auto pairs=st.value("pairs",json::array());json retained=json::array();
         for(const auto& pair:pairs)if(std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==pair.at("a");})&&std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==pair.at("b");}))retained.push_back(pair);
-        st["pairs"]=retained;geometryStyle(styled,shape,st); scenes[it.key()]=rendered(shape,styled,cam,topology);
+        st["pairs"]=retained;scenes[it.key()]=sceneFor(st);
     }
-    if(scenes.empty()){auto styled=canonical;geometryStyle(styled,shape,json::object());scenes["right"]=rendered(shape,styled,cam,topology);}
+    if(scenes.empty())scenes["right"]=sceneFor(json::object());
     json obstacles=json::array();size_t i=0;
     for(const auto& f:state["obstacles"].value("features",json::array())) {
         auto props=f.value("properties",json::object()); if(!props.is_object())props=json::object();
         auto label=props.contains("name")&&props["name"].is_string()?props["name"].get<std::string>():props.contains("name:fr")&&props["name:fr"].is_string()?props["name:fr"].get<std::string>():std::string();
         obstacles.push_back({{"id",std::to_string(i++)},{"name",label},{"properties",props},{"geometry",mapCoordinates(f.at("geometry"),&cam,state.value("planar",false))}});
     }
-    return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles}};
+    return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available}};
 }

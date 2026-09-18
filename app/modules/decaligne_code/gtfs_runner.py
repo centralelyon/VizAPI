@@ -92,37 +92,123 @@ def filter_gtfs(input_path, output_path, selected_route_ids):
             if row.get("stop_id")
         }
 
-        # Include parent stations
         stop_by_id = {
             row.get("stop_id"): row
             for row in stops
+            if row.get("stop_id")
         }
 
-        parent_ids = set()
+        def station_root(stop_id):
+            """Return the top-level parent of a stop without using stop names."""
+            current = stop_id
+            visited = set()
 
-        for stop_id in list(stop_ids):
-            stop = stop_by_id.get(stop_id)
+            while current and current not in visited:
+                visited.add(current)
 
-            if stop:
+                stop = stop_by_id.get(current)
+
+                if not stop:
+                    break
+
                 parent_id = stop.get("parent_station")
 
-                if parent_id:
-                    parent_ids.add(parent_id)
+                if not parent_id:
+                    break
 
-        stop_ids.update(parent_ids)
+                current = parent_id
 
-        # 4. stops
+            return current
+
+
+        # Find the station complexes used by the selected trips.
+        selected_station_roots = {
+            station_root(stop_id)
+            for stop_id in stop_ids
+            if stop_id in stop_by_id
+        }
+
+        selected_station_roots.discard(None)
+        selected_station_roots.discard("")
+
+        for stop_id in stop_by_id:
+            if station_root(stop_id) in selected_station_roots:
+                stop_ids.add(stop_id)
+
+        pathways = []
+
+        if "pathways.txt" in source.namelist():
+            pathways = _read_csv_from_zip(source, "pathways.txt")
+
+            changed = True
+
+            while changed:
+                changed = False
+
+                for pathway in pathways:
+                    from_stop_id = pathway.get("from_stop_id")
+                    to_stop_id = pathway.get("to_stop_id")
+
+                    if (
+                        from_stop_id in stop_ids
+                        or to_stop_id in stop_ids
+                    ):
+                        for pathway_stop_id in (
+                            from_stop_id,
+                            to_stop_id,
+                        ):
+                            if (
+                                pathway_stop_id
+                                and pathway_stop_id in stop_by_id
+                                and pathway_stop_id not in stop_ids
+                            ):
+                                stop_ids.add(pathway_stop_id)
+                                changed = True
+
         filtered_stops = [
             row for row in stops
             if row.get("stop_id") in stop_ids
-        ]
-
+]
         replacements = {
             "routes.txt": filtered_routes,
             "trips.txt": filtered_trips,
             "stop_times.txt": filtered_stop_times,
             "stops.txt": filtered_stops,
         }
+        if pathways:
+            replacements["pathways.txt"] = [
+                row for row in pathways
+                if row.get("from_stop_id") in stop_ids
+                and row.get("to_stop_id") in stop_ids
+            ]
+        if "levels.txt" in source.namelist():
+            levels = _read_csv_from_zip(source, "levels.txt")
+
+            used_level_ids = {
+                row.get("level_id")
+                for row in filtered_stops
+                if row.get("level_id")
+            }
+
+            replacements["levels.txt"] = [
+                row for row in levels
+                if row.get("level_id") in used_level_ids
+            ]
+        for pathway in replacements.get("pathways.txt", []):
+            from_stop_id = pathway.get("from_stop_id")
+            to_stop_id = pathway.get("to_stop_id")
+
+            if from_stop_id not in stop_ids:
+                raise ValueError(
+                    f"pathways.txt references missing from_stop_id: "
+                    f"{from_stop_id}"
+                )
+
+            if to_stop_id not in stop_ids:
+                raise ValueError(
+                    f"pathways.txt references missing to_stop_id: "
+                    f"{to_stop_id}"
+                )
 
         # Optional files that also depend on the selected network
         if "shapes.txt" in source.namelist():
@@ -289,6 +375,27 @@ def _run_gtfs(path, selected_route_ids=None):
 
             gtfs_input = filtered_gtfs
 
+        # gtfs2graph versions can emit process-local (0x...) line IDs and
+        # aggregate by display name. Carry an exact ID token through conversion;
+        # restore the user-facing labels afterwards. No name-based inference.
+        with zipfile.ZipFile(gtfs_input) as archive:
+            original_routes = _read_csv_from_zip(archive, "routes.txt")
+            tokens = {"__transitmap_gtfs_" + row["route_id"].encode("utf-8").hex(): row
+                      for row in original_routes}
+            tagged = directory / "identified.zip"
+            with zipfile.ZipFile(tagged, "w", compression=zipfile.ZIP_DEFLATED) as output:
+                for info in archive.infolist():
+                    if info.filename != "routes.txt":
+                        output.writestr(info, archive.read(info.filename))
+                fields = list(original_routes[0])
+                for key in ("route_short_name", "route_long_name"):
+                    if key not in fields:
+                        fields.append(key)
+                rows = [{**row, "route_short_name": token, "route_long_name": token}
+                        for token, row in tokens.items()]
+                _write_csv_to_zip(output, "routes.txt", rows, fields)
+        conversion_input = tagged
+
         stages = [
             (
                 [
@@ -296,7 +403,7 @@ def _run_gtfs(path, selected_route_ids=None):
                         "GTFS2GRAPH_BIN",
                         "/usr/local/bin/gtfs2graph",
                     ),
-                    str(gtfs_input),
+                    str(conversion_input),
                 ],
                 None,
                 raw,
@@ -373,4 +480,33 @@ def _run_gtfs(path, selected_route_ids=None):
                 "topo did not return a valid network GeoJSON"
             ) from exc
 
+        # Capture original identifiers before graph conversion/simplification loses
+        # direction and traversal. Python only decodes CSV; C++ orders and groups.
+        from app.modules.decaligne_code.edit_sessions import core_call
+        columns = {
+            "trips": ("route_id", "trip_id", "direction_id", "shape_id"),
+            "stops": ("stop_id", "stop_name", "stop_lon", "stop_lat"),
+            "stop_times": ("trip_id", "stop_id", "stop_sequence", "shape_dist_traveled"),
+            "shapes": ("shape_id", "shape_pt_lon", "shape_pt_lat", "shape_pt_sequence", "shape_dist_traveled"),
+        }
+        with zipfile.ZipFile(gtfs_input) as archive:
+            tables = {
+                name: [{key: row.get(key, "") for key in keys}
+                       for row in _read_csv_from_zip(archive, name + ".txt")]
+                if name + ".txt" in archive.namelist() else []
+                for name, keys in columns.items()
+            }
+        graph["transitMapDirections"] = core_call({
+            "op": "gtfs-patterns", "tables": tables,
+        })["directionalData"]
+        originals_by_id = {row["route_id"]: row for row in original_routes}
+        for feature in graph["features"]:
+            for line in (feature.get("properties") or {}).get("lines", []):
+                original = tokens.get(line.get("label")) or tokens.get(line.get("name"))
+                if original is None:
+                    original = originals_by_id.get(str(line.get("id", "")))
+                if original is None:
+                    raise RuntimeError("GTFS converter did not preserve the route identity token")
+                name = original.get("route_short_name") or original.get("route_long_name") or original["route_id"]
+                line.update(id=original["route_id"], name=name, label=name)
         return graph
