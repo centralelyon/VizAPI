@@ -108,23 +108,16 @@ void validateDirectionalData(const json& data) {
         }
     }
 }
-Shape directionalRenderShape(const Shape& source,const json& data,const json& selected) {
-    Shape out=source;out.routes.clear();std::set<std::string> enabled;
-    for(const auto& id:selected)enabled.insert(id.get<std::string>());
-    std::map<std::string,json> patterns;for(const auto& r:data.at("routes"))patterns[r.at("routeId")]=r.at("patterns");
-    int next=0;for(const auto& n:source.nodes)next=std::max(next,n.id+1);
+std::vector<OrderedTraversal> orderedTraversals(const json& data) {
+    validateDirectionalData(data);
+    std::vector<OrderedTraversal> result;
     const bool planar=data.value("coordinateSystem","")=="planar";
-    for(const auto& parent:source.routes) {
-        if(!enabled.count(parent.id)||!patterns.count(parent.id)){out.routes.push_back(parent);continue;}
-        for(const auto& p:patterns[parent.id]) {
-            if(!p.at("representative").get<bool>())continue;
-            ShapeRoute route=parent;route.segmentIndices.clear();route.logicalRouteId=parent.id;
-            route.directionId=p.at("directionId");route.patternId=p.at("patternId");
-            route.id="gtfs:"+json::array({parent.id,route.patternId}).dump();
+    for(const auto& r:data.at("routes"))for(const auto& p:r.at("patterns")) {
+        OrderedTraversal traversal{r.at("routeId").get<std::string>(),&p,{}};
             const auto& stops=p.at("orderedStops");const auto& points=p.at("orderedShapePoints");
             std::vector<Point> line;for(const auto& row:points)line.push_back(position(row,planar));
-            if(line.size()<2)line.clear(); // Missing/degenerate shapes use the stop order.
-            struct Visit {double t;Point pos;const json* stop;};std::vector<Visit> visits;
+            if(line.size()<2 || std::all_of(line.begin(),line.end(),[&](Point q){return distance(q,line.front())<1e-8;}))line.clear(); // Missing/degenerate shapes use the stop order.
+            struct Visit {double t;Point pos;const json* stop;int stopIndex=-1;};std::vector<Visit> visits;
             for(size_t i=0;i<line.size();++i)visits.push_back({double(i),line[i],nullptr});
             double last=0;
             bool distances=line.size()>1;double prev=-1;
@@ -150,10 +143,31 @@ Shape directionalRenderShape(const Shape& source,const json& data,const json& se
                         if(d<best-1e-8){best=d;at=i+t;}
                     }
                 }
-                last=at;visits.push_back({at,pos,&stop});
+                last=at;visits.push_back({at,pos,&stop,int(si)});
             }
             std::stable_sort(visits.begin(),visits.end(),[](const auto& a,const auto& b){return a.t<b.t;});
-            for(const auto& visit:visits) {
+        for(const auto& visit:visits)traversal.samples.push_back({visit.pos,visit.stopIndex});
+        result.push_back(std::move(traversal));
+    }
+    return result;
+}
+Shape directionalRenderShape(const Shape& source,const json& data,const json& selected) {
+    Shape out=source;out.routes.clear();std::set<std::string> enabled;
+    for(const auto& id:selected)enabled.insert(id.get<std::string>());
+    std::map<std::string,std::vector<OrderedTraversal>> patterns;
+    for(auto& traversal:orderedTraversals(data))patterns[traversal.routeId].push_back(std::move(traversal));
+    int next=0;for(const auto& n:source.nodes)next=std::max(next,n.id+1);
+    for(const auto& parent:source.routes) {
+        if(!enabled.count(parent.id)||!patterns.count(parent.id)){out.routes.push_back(parent);continue;}
+        for(const auto& traversal:patterns[parent.id]) {
+            const auto& p=*traversal.pattern;
+            if(!p.at("representative").get<bool>())continue;
+            ShapeRoute route=parent;route.segmentIndices.clear();route.orderedNodes.clear();route.logicalRouteId=parent.id;
+            route.directionId=p.at("directionId");route.patternId=p.at("patternId");
+            route.id="gtfs:"+json::array({parent.id,route.patternId}).dump();
+            const auto& stops=p.at("orderedStops");
+            for(const auto& sample:traversal.samples) {
+                struct {Point pos;const json* stop;} visit{sample.position,sample.stopIndex<0?nullptr:&stops.at(sample.stopIndex)};
                 // Coalesce a coincident shape sample with a stop, never two stop occurrences.
                 if(!route.orderedNodes.empty()) {
                     auto& n=out.nodes[route.orderedNodes.back()];

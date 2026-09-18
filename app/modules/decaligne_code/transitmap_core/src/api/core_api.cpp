@@ -369,15 +369,19 @@ json transitCoreRequest(const json& request) {
         if(map.contains("transitMapDirections")) {
             validateDirectionalData(map["transitMapDirections"]);
             state["directionalData"]=map["transitMapDirections"];
-        } else state.erase("directionalData");
+        } else if(op!="replace-map" || !request.value("preserveRouteDirections",false)) state.erase("directionalData");
         state["bidirectionalRoutes"]=map.value("bidirectionalRoutes",json::array());
         // Fresh generation after LOOM; never match new vector indices to old IDs.
         state["pathIds"]=json::object(); identities(shape,state);
-        if(request.value("preserveRouteDirections",false)) {
+        state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
+        state.erase("shapeTraversals");
+        if(state.contains("directionalData")) {
+            state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
+            state["routeTraversals"]=json::array();
+        } else if(request.value("preserveRouteDirections",false)) {
             require(state.contains("shape"),"Direction remapping needs the previous Shape");
             state["routeTraversals"]=remapRouteDirections(decode(state.at("shape")),shape,state.value("routeTraversals",json::array()));
         } else if(hasRouteDirections(map))state["routeTraversals"]=importRouteDirections(shape,map);
-        else if(state.contains("directionalData"))state["routeTraversals"]=mapGtfsDirections(shape,state["directionalData"]);
         else state["routeTraversals"]=json::array();
         Camera cam;cam.resize(1200,800);GeoData data;
         Route bounds;for(const auto& n:shape.nodes)bounds.segments.push_back({n.pos});data.routes.push_back(bounds);
@@ -401,12 +405,23 @@ json transitCoreRequest(const json& request) {
         }
         // OCTI consumes logical route membership once per segment. Its
         // directions survive separately in state and are remapped on return.
-        if(op=="export")exportRouteDirections(graph,state.value("routeTraversals",json::array()));
-        graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph}};
+        if(op=="loom-export" && state.contains("directionalData"))graph["transitMapDirections"]=state["directionalData"];
+        if(op=="export") {
+            if(state.contains("directionalData")) {
+                if(!state.contains("shapeTraversals"))state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state.value("shapeRevision",0ULL));
+                exportShapeTraversals(graph,shape,state["shapeTraversals"],state.value("shapeRevision",0ULL));
+            } else exportRouteDirections(graph,state.value("routeTraversals",json::array()));
+        }
+        graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
     if(op!="session" && op!="replace-map") {
         Shape before=shape;edit(shape,op,request,cam);identities(shape,state,&before);
-        state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op,request);
+        if(op!="render-geometry" && op!="move-node") {
+            state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
+            if(state.contains("directionalData"))
+                state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
+            else state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op,request);
+        }
     }
     validate(shape);
     auto selected=request.value("bidirectionalRoutes",state.value("bidirectionalRoutes",json::array()));
@@ -458,5 +473,5 @@ json transitCoreRequest(const json& request) {
         auto label=props.contains("name")&&props["name"].is_string()?props["name"].get<std::string>():props.contains("name:fr")&&props["name:fr"].is_string()?props["name:fr"].get<std::string>():std::string();
         obstacles.push_back({{"id",std::to_string(i++)},{"name",label},{"properties",props},{"geometry",mapCoordinates(f.at("geometry"),&cam,state.value("planar",false))}});
     }
-    return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available}};
+    return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
 }

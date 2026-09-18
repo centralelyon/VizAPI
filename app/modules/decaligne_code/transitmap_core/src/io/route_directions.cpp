@@ -1,4 +1,5 @@
 #include "io/route_directions.h"
+#include "io/directional.h"
 #include "core/projection.h"
 #include <algorithm>
 #include <cmath>
@@ -29,7 +30,7 @@ struct Graph {
     }
     // Only route topology supplies connectivity. Direction comes from the ordered
     // input anchors. Without a shape guide, competing paths are rejected.
-    std::vector<int> path(const std::string& route,int a,int b,bool stopBarrier=false) const {
+    std::vector<int> path(const std::string& route,int a,int b,bool stopBarrier=false, const std::set<int>* barriers=nullptr) const {
         if(a==b)return {a};
         auto ri=adj.find(route);if(ri==adj.end())return {};
         const auto& links=ri->second;
@@ -40,7 +41,7 @@ struct Graph {
         while(!queue.empty()) {
             auto [d,u]=queue.top();queue.pop();if(d>cost[u]+1e-8)continue;
             if(u==b)break;
-            if(stopBarrier&&u!=a&&isStationLike(shape.nodes[u].type))continue;
+            if(stopBarrier&&u!=a&&(barriers ? barriers->count(u)>0 : isStationLike(shape.nodes[u].type)))continue;
             auto it=links.find(u);if(it==links.end())continue;
             for(int v:it->second) {
                 double next=d+std::max(1e-6,distance(shape.nodes[u].pos,shape.nodes[v].pos));
@@ -59,7 +60,7 @@ struct Graph {
             while(!pending.empty()) {
                 int u=pending.back();pending.pop_back();
                 if(u==b)throw std::invalid_argument("Ambiguous GTFS/OCTI traversal: shape guidance is required for route "+route);
-                if(u!=a&&isStationLike(shape.nodes[u].type))continue;
+                if(u!=a&&(barriers ? barriers->count(u)>0 : isStationLike(shape.nodes[u].type)))continue;
                 auto it=links.find(u);if(it==links.end())continue;
                 for(int v:it->second) {
                     if((u==out[i-1]&&v==out[i])||(v==out[i-1]&&u==out[i]))continue;
@@ -78,7 +79,7 @@ struct Graph {
 void append(json& out,json record,const Shape& s,const std::vector<int>& nodes) {
     for(size_t i=1;i<nodes.size();++i){record["from"]=s.nodes[nodes[i-1]].uid;record["to"]=s.nodes[nodes[i]].uid;out.push_back(record);}
 }
-json unique(const json& records){json out=json::array();std::set<std::string> seen;for(const auto& r:records)if(seen.insert(r.dump()).second)out.push_back(r);return out;}
+
 }
 bool hasRouteDirections(const json& map) {
     for(const auto& f:map.at("features"))if(f.at("geometry").at("type")=="LineString")
@@ -153,47 +154,150 @@ json importRouteDirections(const Shape& s,const json& map) {
                 auto from=id(item.at("from")),to=id(item.at("to"));
                 if(!((from==a&&to==b)||(from==b&&to==a)))throw std::invalid_argument("Route direction must reference its segment endpoints");
                 json record={{"routeId",id(line.contains("id")?line["id"]:line.at("label"))}};
-                for(const auto* key:{"direction","pattern"})if(item.contains(key))record[key]=id(item[key]);
+                for(const auto* key:{"direction","pattern","directionId","patternId","traversalIndex"})if(item.contains(key))record[key]=item[key];
                 auto path=chain;if(from==b)std::reverse(path.begin(),path.end());
                 append(records,record,s,path);
             }
         }
     }
-    return unique(records);
+    return records;
 }
-json mapGtfsDirections(const Shape& s,const json& data) {
-    Graph g(s);json records=json::array();const bool planar=data.value("coordinateSystem","")=="planar";
-    for(const auto& r:data.at("routes")) {
-        const auto rid=r.at("routeId").get<std::string>();auto ri=g.adj.find(rid);if(ri==g.adj.end())continue;
-        for(const auto& pattern:r.at("patterns")) {
-            json record={{"routeId",rid},{"direction",pattern.at("directionId")}};
-            // Retain variants, including non-representative GTFS trips.
-            if(r.at("patterns").size()>1)record["pattern"]=pattern.at("patternId");
-            const bool shaped=pattern.at("orderedShapePoints").size()>1;
-            const auto& rows=pattern.at(shaped?"orderedShapePoints":"orderedStops");
+json mapGtfsDirections(const Shape& s,const json& data,std::uint64_t revision) {
+    Graph g(s);
+    json result={{"revision",revision},{"traversals",json::array()},{"diagnostics",json::array()}};
+    for(const auto& input:orderedTraversals(data)) {
+        const auto& pattern=*input.pattern;
+        ShapeTraversal t; t.logicalRouteId=input.routeId;t.directionId=pattern.at("directionId");
+        t.patternId=pattern.at("patternId");t.revision=revision;
+        json diagnostic={{"routeId",t.logicalRouteId},{"directionId",t.directionId},{"patternId",t.patternId}};
+        try {
+            const auto ri=g.adj.find(t.logicalRouteId);
+            if(ri==g.adj.end())throw std::invalid_argument("Logical route is absent from this Shape revision");
             std::vector<int> anchors;
-            for(const auto& row:rows) {
-                Point p=coordinate(row.at("position"),planar);int best=-1;double score=std::numeric_limits<double>::infinity();
-                // Stop IDs are preferred; distance is only for mapping original
-                // GTFS coordinates onto the simplified graph, never edit/export.
-                bool matched=false;
+            std::vector<json> origins;
+            const auto& stops=pattern.at("orderedStops");
+            for(size_t si=0;si<input.samples.size();++si) {
+                const auto& sample=input.samples[si];
+                json origin={{"sampleIndex",si},{"position",json::array({sample.position.x,sample.position.y})}};
+                if(sample.stopIndex>=0)origin["stop"]=stops.at(sample.stopIndex);
+                diagnostic["visit"]=origin;
+                diagnostic.erase("transition");diagnostic.erase("candidateNodes");
+                double best=std::numeric_limits<double>::infinity();int chosen=-1;
+                bool exact=false;std::vector<int> candidates;
                 for(const auto& entry:ri->second) {
-                    const auto& n=s.nodes[entry.first];bool match=!shaped&&n.station_id==row.value("stopId",std::string("\x01"));
-                    if(match&&!matched){matched=true;score=std::numeric_limits<double>::infinity();}
-                    if(matched&&!match)continue;
-                    double d=distance(p,n.pos);if(d<score){score=d;best=entry.first;}
+                    const auto& n=s.nodes[entry.first];
+                    if(sample.stopIndex>=0&&!isStationLike(n.type))continue;
+                    const bool match=sample.stopIndex>=0&&n.station_id==stops[sample.stopIndex].at("stopId");
+                    if(match&&!exact){exact=true;best=std::numeric_limits<double>::infinity();candidates.clear();}
+                    if(exact&&!match)continue;
+                    const double d=distance(sample.position,n.pos);
+                    if(d<best-1e-6){best=d;chosen=entry.first;candidates={chosen};}
+                    else if(std::abs(d-best)<1e-6)candidates.push_back(entry.first);
                 }
-                if(best>=0&&(anchors.empty()||anchors.back()!=best))anchors.push_back(best);
+                diagnostic["candidateNodes"]=json::array();
+                for(int n:candidates)diagnostic["candidateNodes"].push_back({{"nodeId",s.nodes[n].uid},{"distance",best}});
+                if(chosen<0)throw std::invalid_argument("No route station candidate for GTFS visit");
+                // Explicitly bounded spatial association, never name matching or
+                // requiring platform IDs to equal a logical station ID.
+                if(sample.stopIndex>=0&&best>250.0)
+                    throw std::invalid_argument("Nearest route station exceeds 250 projected-coordinate units; correspondence is unresolved");
+                if(candidates.size()>1) {
+                    if(sample.stopIndex<0)continue; // An ambiguous geometry sample is not a stop visit.
+                    throw std::invalid_argument("Equally plausible Shape station candidates");
+                }
+                if(sample.stopIndex>=0)t.stopNodes.push_back(chosen);
+                if(anchors.empty()||anchors.back()!=chosen){anchors.push_back(chosen);origins.push_back(origin);}
             }
-            if(anchors.size()<2)throw std::invalid_argument("GTFS pattern has no distinct Shape anchors for route "+rid);
+            if(anchors.empty())throw std::invalid_argument("No Shape anchors");
+            // Barriers are observed ordered anchors, not every Shape station.
+            // Thus adding a station between GTFS stops does not break a traversal.
+            const std::set<int> barriers(anchors.begin(),anchors.end());
+            t.orderedNodes.push_back(anchors.front());
+            const auto route=std::find_if(s.routes.begin(),s.routes.end(),[&](const auto& r){return r.id==t.logicalRouteId;});
             for(size_t i=1;i<anchors.size();++i) {
-                auto path=g.path(rid,anchors[i-1],anchors[i],!shaped);
-                if(path.empty())throw std::invalid_argument("Cannot map GTFS traversal onto Shape for route "+rid);
-                append(records,record,s,path);
+                diagnostic["transition"]={{"fromVisit",origins[i-1]},{"toVisit",origins[i]},
+                    {"fromNode",s.nodes[anchors[i-1]].uid},{"toNode",s.nodes[anchors[i]].uid}};
+                diagnostic.erase("visit");diagnostic.erase("candidateSegments");
+                diagnostic["candidateNodes"]=json::array({s.nodes[anchors[i-1]].uid,s.nodes[anchors[i]].uid});
+                const auto path=g.path(t.logicalRouteId,anchors[i-1],anchors[i],true,&barriers);
+                if(path.empty())throw std::invalid_argument("No route connection between ordered anchors without crossing another traversal anchor");
+                for(size_t j=1;j<path.size();++j) {
+                    std::vector<int> edges;
+                    for(int ei:route->segmentIndices) {const auto& e=s.segments[ei];
+                        if((e.a==path[j-1]&&e.b==path[j])||(e.b==path[j-1]&&e.a==path[j]))edges.push_back(ei);
+                    }
+                    diagnostic["candidateSegments"]=json::array();
+                    for(int ei:edges)diagnostic["candidateSegments"].push_back(s.segments[ei].uid);
+                    if(edges.size()!=1)throw std::invalid_argument("Parallel Shape segments need an explicit geometric correspondence");
+                    t.orderedSegments.push_back(edges.front());t.orderedNodes.push_back(path[j]);
+                }
             }
+            json mapped={{"routeId",t.logicalRouteId},{"directionId",t.directionId},{"patternId",t.patternId},
+                {"orderedNodes",json::array()},{"orderedSegments",json::array()},{"stopNodes",json::array()}};
+            for(int n:t.orderedNodes)mapped["orderedNodes"].push_back(s.nodes[n].uid);
+            for(int e:t.orderedSegments)mapped["orderedSegments"].push_back(s.segments[e].uid);
+            for(int n:t.stopNodes)mapped["stopNodes"].push_back(s.nodes[n].uid);
+            result["traversals"].push_back(mapped);
+        } catch(const std::invalid_argument& e) {
+            diagnostic["reason"]=e.what();result["diagnostics"].push_back(diagnostic);
         }
     }
-    return unique(records);
+    return result;
+}
+void exportShapeTraversals(json& graph,const Shape& shape,const json& mapping,std::uint64_t revision) {
+    if(mapping.at("revision").get<std::uint64_t>()!=revision)
+        throw std::invalid_argument("Stale Shape traversal revision");
+    // Validate every segment reference before exposing even a partial mapping.
+    std::map<std::string,json> index;
+    for(const auto& t:mapping.at("traversals")) {
+        const auto& ns=t.at("orderedNodes");const auto& es=t.at("orderedSegments");
+        if(ns.size()!=es.size()+1)throw std::invalid_argument("Invalid Shape traversal sequence");
+        auto route=std::find_if(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==t.at("routeId");});
+        if(route==shape.routes.end())throw std::invalid_argument("Stale Shape traversal route");
+        for(size_t i=0;i<es.size();++i) {
+            bool valid=false;
+            for(int ei:route->segmentIndices){const auto& e=shape.segments[ei];
+                if(e.uid==es[i]&&((shape.nodes[e.a].uid==ns[i]&&shape.nodes[e.b].uid==ns[i+1])||
+                                  (shape.nodes[e.b].uid==ns[i]&&shape.nodes[e.a].uid==ns[i+1])))valid=true;
+            }
+            if(!valid)throw std::invalid_argument("Stale Shape traversal segment: "+es[i].get<std::string>());
+            const auto key = json::array({ t.at("routeId"),es[i] }).dump();
+            if (!index.count(key))index[key] = json::array();
+
+            const json occurrence = {
+                {"from", ns[i]},
+                {"to", ns[i + 1]}
+            };
+
+            bool exists = false;
+            for (const auto& existing : index[key]) {
+                if (existing.at("from") == occurrence.at("from") &&
+                    existing.at("to") == occurrence.at("to")) {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists)
+                index[key].push_back(occurrence);
+        }
+    }
+    for(auto& f:graph["features"])if(f["geometry"]["type"]=="LineString") {
+        auto& p=f["properties"];
+        json lines=json::array();
+        for(const auto& line:p["lines"]) {
+            auto it=index.find(json::array({line.at("id"),p.at("id")}).dump());
+            if(it==index.end()){lines.push_back(line);continue;}
+            for(const auto& traversal:it->second) {
+                auto occurrence=line;
+                occurrence["from"]=traversal.at("from");occurrence["to"]=traversal.at("to");
+                lines.push_back(occurrence);
+            }
+        }
+        p["lines"]=lines;
+    }
+    // Public legacy JSON exposes only per-line ordered endpoints.
+    // GTFS provenance and the complete ordered mapping remain in session state.
 }
 json editRouteDirections(const Shape& before,const Shape& after,const json& records,const std::string& op,const json& req) {
     Graph old(before),now(after);json changed=records;
@@ -228,63 +332,58 @@ json editRouteDirections(const Shape& before,const Shape& after,const json& reco
             else throw std::invalid_argument("Cannot preserve traversal across segment split");
         }
     }
-    return unique(out);
+    return out;
 }
 json remapRouteDirections(const Shape& before,const Shape& after,const json& records) {
-    Graph old(before),now(after);std::map<std::string,int> mapped;
+    // Legacy records have only explicitly supplied per-edge traversal. They do
+    // not justify reconstructing an ordered GTFS trip from a directed edge set.
+    Graph now(after);std::map<std::string,int> mapped;
     for(const auto& n:before.nodes) {
         if(now.nodes.count(n.uid)){mapped[n.uid]=now.nodes.at(n.uid);continue;}
         if(n.station_id.empty())continue;
-        int match=-1;for(size_t i=0;i<after.nodes.size();++i)if(after.nodes[i].station_id==n.station_id){if(match>=0){match=-2;break;}match=int(i);}
+        int match=-1;
+        for(size_t i=0;i<after.nodes.size();++i)if(after.nodes[i].station_id==n.station_id) {
+            if(match>=0){match=-2;break;}match=int(i);
+        }
         if(match>=0)mapped[n.uid]=match;
     }
-    // OCTI may remove shape points. Collapse directed chains through unmapped
-    // nodes before mapping surviving anchors to the new route topology.
-    json out=json::array();std::map<std::string,std::vector<json>> groups;
-    for(const auto& r:records){auto key=r;key.erase("from");key.erase("to");groups[key.dump()].push_back(r);}
-    for(const auto& group:groups) {
-        const auto outputBefore=out.size();
-        std::set<std::pair<std::string,std::string>> covered;
-        std::map<std::string,std::set<std::string>> adj;
-        for(const auto& r:group.second)adj[r.at("from")].insert(r.at("to"));
-        for(const auto& start:adj)if(mapped.count(start.first)) {
-            std::vector<std::string> pending(start.second.begin(),start.second.end());std::set<std::string> seen;
-            for(const auto& next:start.second)covered.insert({start.first,next});
-            while(!pending.empty()) {
-                auto node=pending.back();pending.pop_back();if(!seen.insert(node).second)continue;
-                if(mapped.count(node)) {
-                    auto record=json::parse(group.first);auto path=now.path(record.at("routeId"),mapped.at(start.first),mapped.at(node),true);
-                    if(path.empty())throw std::invalid_argument("OCTI lost a directed route connection");
-                    append(out,record,after,path);
-                } else {
-                    if(adj[node].empty())throw std::invalid_argument("OCTI lost a directional endpoint");
-                    for(const auto& next:adj[node]){covered.insert({node,next});pending.push_back(next);}
-                }
-            }
-        }
-        for(const auto& edge:group.second)if(!covered.count({edge.at("from"),edge.at("to")}))
-            throw std::invalid_argument("OCTI lost the anchors of a directional component");
-        if(outputBefore==out.size())throw std::invalid_argument("OCTI did not preserve enough node identities to retain a directional pattern");
+    json out=json::array();
+    for(const auto& record:records) {
+        const auto a=record.at("from").get<std::string>(),b=record.at("to").get<std::string>();
+        if(!mapped.count(a)||!mapped.count(b))throw std::invalid_argument(
+            "Cannot reconcile explicit legacy traversal without GTFS source: "+record.dump());
+        const auto path=now.path(record.at("routeId"),mapped.at(a),mapped.at(b),true);
+        if(path.size()<2)throw std::invalid_argument("Lost explicit legacy traversal: "+record.dump());
+        append(out,record,after,path);
     }
-    if(!records.empty()&&out.empty())throw std::invalid_argument("OCTI did not preserve enough node identities to retain route directions");
-    return unique(out);
+    return out;
 }
 void exportRouteDirections(json& graph,const json& records) {
     std::map<std::string,json> index;
     for(const auto& record:records) {
         auto a=record.at("from").get<std::string>(),b=record.at("to").get<std::string>();if(b<a)std::swap(a,b);
-        auto key=json::array({record.at("routeId"),a,b}).dump();if(!index.count(key))index[key]=json::array();
-        // GTFS direction/pattern IDs are private provenance. Public direction
-        // is expressed exclusively by ordered endpoints.
-        index[key].push_back({{"from",record.at("from")},{"to",record.at("to")}});
+        const auto key=json::array({record.at("routeId"),a,b}).dump();
+        if(!index.count(key))index[key]=json::array();
+        const json occurrence = { {"from",record.at("from")},{"to",record.at("to")} };
+
+        bool exists = false;
+        for (const auto& existing : index[key]) {
+            if (existing.at("from") == occurrence.at("from") &&
+                existing.at("to") == occurrence.at("to")) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists)index[key].push_back(occurrence);
     }
     for(auto& f:graph["features"])if(f["geometry"]["type"]=="LineString") {
         auto& p=f["properties"];auto a=p.at("from").get<std::string>(),b=p.at("to").get<std::string>();if(b<a)std::swap(a,b);
         json lines=json::array();
         for(const auto& line:p["lines"]) {
-            auto found=index.find(json::array({line.at("id"),a,b}).dump());
-            if(found==index.end()){lines.push_back(line);continue;}
-            for(const auto& traversal:unique(found->second)) {
+            auto it=index.find(json::array({line.at("id"),a,b}).dump());
+            if(it==index.end()){lines.push_back(line);continue;}
+            for(const auto& traversal:it->second) {
                 auto occurrence=line;
                 occurrence["from"]=traversal.at("from");occurrence["to"]=traversal.at("to");
                 lines.push_back(occurrence);

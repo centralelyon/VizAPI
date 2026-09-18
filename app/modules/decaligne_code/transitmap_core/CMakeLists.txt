@@ -48,3 +48,12 @@ target_link_libraries(
     PRIVATE
         TransitMapCore
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME traversal-regression
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/traversal_regression.py $<TARGET_FILE:transitmap-core>)
+    endif()
+endif()

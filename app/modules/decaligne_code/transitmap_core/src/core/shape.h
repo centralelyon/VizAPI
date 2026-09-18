@@ -48,6 +48,14 @@ struct ShapeRoute {
     ObstacleKind obstacleKind = ObstacleKind::Line;
 };
 
+// Derived traversal for one authoritative Shape revision, not GTFS metadata.
+// stopNodes preserves every visit, including consecutive visits to one node.
+struct ShapeTraversal {
+    std::string logicalRouteId, directionId, patternId;
+    std::vector<int> orderedNodes, orderedSegments, stopNodes;
+    std::uint64_t revision = 0;
+};
+
 struct Shape {
     std::vector<ShapeNode> nodes;
     std::vector<ShapeSegment> segments;
