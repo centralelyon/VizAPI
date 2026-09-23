@@ -19,7 +19,9 @@ COPY pyproject.toml .
 COPY public public/
 COPY app app/
 
-
+# Copy Cities data - by Mu
+COPY data/modules/decaligne_code/cities/ \
+     /vizapi/decaligne-seed-data/cities/
 
 # Build Decaligne LOOM / octi - by Mu
 RUN chmod +x app/modules/decaligne_code/loom/build.sh \
@@ -46,11 +48,11 @@ RUN cmake \
 
 ENV TRANSITMAP_CORE_BIN=/usr/local/bin/transitmap-core
 
+RUN chmod +x /vizapi/app/modules/decaligne_code/init_data.sh
 
 
-    
 # this is wrong
-COPY data data/ 
+# COPY data data/ 
 
 EXPOSE 8000
 
