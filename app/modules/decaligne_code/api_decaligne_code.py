@@ -131,4 +131,7 @@ async def gtfs(
 
 # Reuse this module's service, proxy path and existing VizAPI lifecycle.
 from app.modules.decaligne_code.edit_router import router as edit_router
+from app.modules.decaligne_code.storage import router as storage_router
+
 module.router.include_router(edit_router)
+module.router.include_router(storage_router)

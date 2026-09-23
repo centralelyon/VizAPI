@@ -6,7 +6,9 @@ leave the persisted Shape, style, and revision unchanged.
 """
 from contextlib import contextmanager
 import json
+import logging
 import os
+logger = logging.getLogger(__name__)
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -16,6 +18,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.modules.decaligne_code.loom_runner import run_octi
+from app.modules.decaligne_code import storage, evaluation
 
 MAX_BODY = 16 * 1024 * 1024
 CORE_TIMEOUT = 45
@@ -53,7 +56,13 @@ class EditSessions:
 
     @contextmanager
     def connect(self):
-        path = Path(self.database or os.environ.get("TRANSITMAP_SESSION_DB", "data/transitmap-sessions.sqlite3"))
+        path = Path(
+            self.database
+            or os.environ.get(
+                "TRANSITMAP_SESSION_DB",
+                storage.data_root() / "runtime" / "transitmap-sessions.sqlite3",
+            )
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
@@ -100,6 +109,8 @@ class EditSessions:
                 (now - SESSION_TTL,),
             )
 
+            conn.execute("DELETE FROM edit_checkpoints WHERE session_id NOT IN (SELECT id FROM edit_sessions)")
+
             if conn.execute(
                 "SELECT COUNT(*) FROM edit_sessions"
             ).fetchone()[0] >= MAX_SESSIONS:
@@ -131,6 +142,7 @@ class EditSessions:
                 ),
             )
 
+
         response = self.public(
             result,
             sid,
@@ -154,6 +166,210 @@ class EditSessions:
         return sid, revision, json.loads(row[2])
 
     def apply(self, operation, body):
+        if operation == "session":
+            participant = body.get("participantId")
+
+            if participant is not None:
+                evaluation.validate_id(participant)
+
+            result = self._apply(operation, body)
+
+            if participant is not None:
+                try:
+                    evaluation.bind(
+                        participant,
+                        result["sessionId"],
+                    )
+
+                    input_svg = body.get("inputSvg")
+
+                    if input_svg is not None:
+                        evaluation.save_svg(
+                            participant,
+                            result["sessionId"],
+                            "input",
+                            input_svg,
+                        )
+
+                except OSError as exc:
+                    raise HTTPException(
+                        503,
+                        "Could not initialize evaluation logging"
+                    ) from exc
+
+            return result
+        sid = body.get("sessionId")
+        participant = body.get("participantId")
+        with evaluation.session_lock(sid, participant) as path:
+            if operation == "evaluation":
+                if path is None:
+                    raise HTTPException(409, "Session was created without an evaluation participant")
+                _, revision, _ = self.read(body)
+                events = evaluation.ui_events(body)
+                for event in events:
+                    if event["action"] in ("undo", "redo"):
+                        # Only visual-only history can be reported by the UI endpoint.
+                        event["fromRevision"] = revision
+                        event["toRevision"] = revision
+                try:
+                    evaluation.append(path, participant, sid, revision, events)
+                except OSError as exc:
+                    raise HTTPException(503, "Evaluation log could not be written") from exc
+                return {"logged": True, "sessionId": sid, "revision": revision}
+            needs_event = operation in evaluation.OPERATIONS or (operation == "render-geometry" and "bidirectionalRoutes" in body)
+            history = body.get("historyAction") if operation == "checkout" else None
+            if history is not None and history not in ("undo", "redo"):
+                raise HTTPException(422, "Invalid history action")
+            if path is not None and (needs_event or history):
+                evaluation.validate_id(body.get("eventId"))
+                try:
+                    _, old_revision, before = self.read(body)
+                except HTTPException as exc:
+                    with self.connect() as conn:
+                        row = conn.execute("SELECT revision, state FROM edit_sessions WHERE id=?", (sid,)).fetchone()
+                    current_revision, current_state = (row[0], json.loads(row[1])) if row else (None, {})
+                    event = evaluation.operation_event(operation, body, current_state, None, 0, failed=True)
+                    if history:
+                        event = {"eventId":body["eventId"],"action":history,"status":"failed"}
+                    if event:
+                        event["errorStatus"] = exc.status_code
+                        evaluation.warning_append(path, participant, sid, current_revision, [event])
+                    raise
+            else:
+                old_revision, before = body.get("revision"), {}
+            started = time.monotonic()
+            try:
+                result = self._apply(operation, body)
+            except HTTPException as exc:
+                if path is not None and (needs_event or history):
+                    event = evaluation.operation_event(operation, body, before, None, time.monotonic()-started, failed=True)
+                    if history:
+                        event = {"eventId":body["eventId"],"action":history,"status":"failed",
+                                 "fromRevision":old_revision,"toRevision":old_revision,
+                                 "toCheckpointId":body.get("checkpointId")}
+                    if event:
+                        event["errorStatus"] = exc.status_code
+                        evaluation.warning_append(path, participant, sid, old_revision, [event])
+                raise
+            if path is not None and (needs_event or history):
+                event = evaluation.operation_event(
+                    operation,
+                    body,
+                    before,
+                    result,
+                    time.monotonic() - started,
+                )
+
+                if history:
+                    event = {
+                        "eventId": body["eventId"],
+                        "action": history,
+                        "status": "success",
+                        "fromRevision": old_revision,
+                        "toRevision": result["revision"],
+                        "fromCheckpointId": body.get(
+                            "fromCheckpointId"
+                        ),
+                        "toCheckpointId": result.get(
+                            "checkpointId"
+                        ),
+                        "side": (
+                            body.get("evaluationContext") or {}
+                        ).get("side"),
+                    }
+
+                if event:
+                    warning = evaluation.warning_append(
+                        path,
+                        participant,
+                        sid,
+                        result["revision"],
+                        [event],
+                    )
+
+                    if warning:
+                        result["evaluationWarning"] = warning
+
+                # Upload successfully committed:
+                # save the final rendered canvas and close this evaluation task.
+                if operation == "upload":
+                    try:
+                        input_svg = body.get(
+                            "inputSvg"
+                        )
+
+                        output_svg = body.get(
+                            "uploadSvg"
+                        )
+
+                        if input_svg is None:
+                            raise HTTPException(
+                                422,
+                                "Upload is missing input SVG",
+                            )
+
+                        if output_svg is None:
+                            raise HTTPException(
+                                422,
+                                "Upload is missing output SVG",
+                            )
+
+                        evaluation.save_svg(
+                            participant,
+                            sid,
+                            "input",
+                            input_svg,
+                        )
+
+                        evaluation.save_svg(
+                            participant,
+                            sid,
+                            "output",
+                            output_svg,
+                        )
+
+                        evaluation.close(
+                            sid,
+                            participant,
+                        )
+
+                    except (
+                        OSError,
+                        ValueError,
+                        HTTPException,
+                    ):
+                        logger.exception(
+                            "Could not finalize evaluation "
+                            "artifacts for session %s",
+                            sid,
+                        )
+
+                        result["evaluationWarning"] = (
+                            "Upload succeeded, but evaluation "
+                            "artifacts could not be finalized."
+                        )
+            return result
+
+    def _apply(self, operation, body):
+        if operation == "upload":
+            sid, revision, state = self.read(body)
+
+            eid = evaluation.evaluation_id(
+                sid
+            )
+
+            exported = self.core({
+                "op": "export",
+                "state": state,
+            })
+
+            return storage.save_upload(
+                exported["map"],
+                body,
+                sid,
+                revision,
+                eid,
+            )
         if operation == "snapshot":
             sid = body.get("sessionId")
 
@@ -266,6 +482,7 @@ class EditSessions:
                         revision,
                     ),
                 ).rowcount
+
 
             if updated != 1:
                 raise HTTPException(

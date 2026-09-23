@@ -28,7 +28,7 @@ def endpoint(operation):
 
 
 OPERATIONS = (
-    "session", "move-node", "delete-node", "add-station", "merge-stations",
+    "session", "evaluation", "upload", "move-node", "delete-node", "add-station", "merge-stations",
     "split-station", "split-segment", "add-route", "delete-route",
     "render-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"
 )
