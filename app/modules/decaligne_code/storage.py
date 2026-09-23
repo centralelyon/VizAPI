@@ -13,12 +13,19 @@ router = APIRouter()
 
 
 def data_root():
-    return Path(
+    explicit = os.environ.get("TRANSITMAP_DATA_DIR")
+
+    if explicit:
+        return Path(explicit).resolve()
+
+    modules_root = Path(
         os.environ.get(
-            "TRANSITMAP_DATA_DIR",
-            "/vizapi/data/modules/decaligne_code",
+            "DATA_PATH_MODULES",
+            "./data/modules/",
         )
     ).resolve()
+
+    return (modules_root / "decaligne_code").resolve()
 
 
 def city_path(city, suffix):
