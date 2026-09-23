@@ -48,8 +48,8 @@ RUN cmake \
 
 ENV TRANSITMAP_CORE_BIN=/usr/local/bin/transitmap-core
 
-RUN chmod +x /vizapi/app/modules/decaligne_code/init_data.sh
-
+RUN sed -i 's/\r$//' /vizapi/app/modules/decaligne_code/init_data.sh \
+    && chmod +x /vizapi/app/modules/decaligne_code/init_data.sh
 
 # this is wrong
 # COPY data data/ 
