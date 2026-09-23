@@ -65,30 +65,27 @@ def catalog():
     if not root.is_dir():
         raise HTTPException(
             503,
-            "City catalog is not installed "
-            "in the module data directory",
+            {
+                "message": "City catalog is not installed",
+                "dataRoot": str(data_root()),
+                "citiesPath": str(root),
+                "cwd": str(Path.cwd()),
+                "TRANSITMAP_DATA_DIR": os.environ.get("TRANSITMAP_DATA_DIR"),
+                "DATA_PATH_MODULES": os.environ.get("DATA_PATH_MODULES"),
+            },
         )
 
     result = []
 
     for path in sorted(root.iterdir()):
-        if re.fullmatch(
-            r"[a-zA-Z0-9_-]+",
-            path.name,
-        ):
+        if re.fullmatch(r"[a-zA-Z0-9_-]+", path.name):
             try:
-                city_path(
-                    path.name,
-                    ".json",
-                )
+                city_path(path.name, ".json")
                 result.append(path.name)
-
             except HTTPException:
                 pass
 
-    return {
-        "cities": result,
-    }
+    return {"cities": result}
 
 
 @router.get("/catalog/{city}/network", include_in_schema=False)
