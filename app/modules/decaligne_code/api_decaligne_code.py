@@ -173,3 +173,6 @@ from app.modules.decaligne_code.storage import router as storage_router
 
 module.router.include_router(edit_router)
 module.router.include_router(storage_router)
+
+from app.modules.decaligne_code.background_image import router as background_router
+module.router.include_router(background_router)
