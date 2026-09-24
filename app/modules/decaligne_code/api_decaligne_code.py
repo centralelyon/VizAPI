@@ -3,7 +3,7 @@ import tempfile
 
 from pathlib import Path
 
-from fastapi import HTTPException, Query, Request
+from fastapi import File, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.modules.decaligne_code.gtfs_runner import (
@@ -128,6 +128,44 @@ async def gtfs(
             502,
             str(exc),
         ) from exc
+
+from app.modules.decaligne_code.input_runner import inspect_input, convert_input
+
+
+async def _uploaded_files(files: list[UploadFile]):
+    result = []
+    total = 0
+    for upload in files:
+        data = await upload.read()
+        total += len(data)
+        if total > MAX_UPLOAD:
+            raise HTTPException(413, "Input files must be at most 100 MB total")
+        result.append((upload.filename or "input", data))
+    return result
+
+
+@module.router.post("/input/routes")
+async def input_routes(files: list[UploadFile] = File(...)):
+    try:
+        payload = await _uploaded_files(files)
+        return await run_in_threadpool(inspect_input, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@module.router.post("/input")
+async def input_convert(files: list[UploadFile] = File(...), route_id: list[str] = Query(default=[])):
+    try:
+        payload = await _uploaded_files(files)
+        return await run_in_threadpool(convert_input, payload, route_id)
+    except GtfsBusyError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(504, "GTFS conversion timed out.") from exc
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 # Reuse this module's service, proxy path and existing VizAPI lifecycle.
 from app.modules.decaligne_code.edit_router import router as edit_router
