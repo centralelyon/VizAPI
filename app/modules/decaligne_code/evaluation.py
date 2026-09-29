@@ -20,7 +20,7 @@ UI_ACTIONS = {'session-start', 'style-change', 'style-select', 'mode-change',
               'edit-mode', 'side-change', 'snap-change', 'undo', 'redo'}
 OPERATIONS = {'move-node', 'delete-node', 'merge-stations', 'split-station',
               'split-segment', 'add-station', 'add-route', 'delete-route',
-              'restore', 'loom', 'upload'}
+              'restore', 'loom', 'upload', 'draw-route', 'draw-line-feature', 'draw-region-feature'}
 
 
 def validate_id(value):
@@ -282,6 +282,13 @@ def operation_event(operation, body, before, result, elapsed, failed=False):
             event[key] = body[key]
     before_nodes = {n['id']: n for n in before.get('shape', {}).get('nodes', [])}
     after_nodes = {n['id']: n for n in (result or {}).get('shape', {}).get('nodes', [])}
+    if operation.startswith('draw-'):
+        event.update(points=body.get('points'), coordinateSystem='canvas', snap=body.get('snap', False),
+                     color=body.get('color'))
+        if result:
+            old_routes = {r['id'] for r in before.get('shape', {}).get('routes', [])}
+            event['addedRouteIds'] = [r['id'] for r in result.get('shape', {}).get('routes', []) if r['id'] not in old_routes]
+            event['addedNodeIds'] = sorted(after_nodes.keys() - before_nodes.keys())
     if operation == 'move-node':
         old = before_nodes.get(body.get('nodeId'), {})
         new = after_nodes.get(body.get('nodeId'), {})

@@ -530,29 +530,18 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes")
+        allowed = ("nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":
-            graph = self.core({"op": "loom-export", "state": state})["map"]
-            # Embedded visual data is not LOOM input.
-            graph.pop("transitMapObstacles", None)
+            prepared = self.core({"op": "loom-export", "state": state})
             try:
-                new_map = self.loom(graph)
+                new_map = self.loom(prepared["map"])
             except (OSError, RuntimeError) as exc:
                 raise HTTPException(502, str(exc)) from exc
-            # OCTI may omit the optional name field. Route IDs are identity,
-            # labels are display text; recover metadata from the current Shape.
-            routes = {r["id"]: r for r in state["shape"]["routes"]}
-            for feature in new_map.get("features", []):
-                for line in (feature.get("properties") or {}).get("lines", []):
-                    route = routes.get(str(line.get("id", "")))
-                    if route:
-                        line.update(name=route["name"], label=route["name"])
-            if "directionalData" in state:
-                new_map["transitMapDirections"] = state["directionalData"]
-                new_map["bidirectionalRoutes"] = state.get("bidirectionalRoutes", [])
-            payload.update(op="replace-map", map=new_map, obstacles=state["obstacles"], preserveRouteDirections=True)
+            # C++ loads the native optimizer result and restores background
+            # route metadata. No coordinate interpolation or graph replacement.
+            payload.update(op="loom-apply", map=new_map)
         elif operation == "restore":
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)

@@ -6,12 +6,15 @@
 #include "io/route_directions.h"
 #include "io/shape_loom_export.h"
 #include "render/render_geometry.h"
+#include "obs/line.h"
+#include "obs/region.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
 #include <set>
 #include <sstream>
 #include <iomanip>
+
 #include <stdexcept>
 
 using json = nlohmann::json;
@@ -111,7 +114,7 @@ json encode(const Shape& s, const Camera& camera, const StyledShape& styled, jso
     json nodes=json::array(),edges=json::array(),routes=json::array();
     std::vector<std::set<std::string>> nr(s.nodes.size()),er(s.segments.size());
     for(const auto& r:s.routes) for(int ei:r.segmentIndices) {
-        er.at(ei).insert(r.id); nr.at(s.segments[ei].a).insert(r.id); nr.at(s.segments[ei].b).insert(r.id);
+        er.at(ei).insert(r.id); if(!r.isObstacle){nr.at(s.segments[ei].a).insert(r.id); nr.at(s.segments[ei].b).insert(r.id);}
     }
     for(size_t i=0;i<s.nodes.size();++i) {
         const auto& n=s.nodes[i];
@@ -189,6 +192,7 @@ void geometryStyle(StyledShape& s, const Shape& shape, const json& style) {
 json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, const json& topology) {
     auto display=buildStyledShapeDisplayData(s,camera); json routes=json::array(),stations=json::array();
     for(size_t ri=0;ri<shape.routes.size();++ri) {
+        if(shape.routes[ri].isObstacle)continue;
         json paths=json::array();
         for(size_t pi=0;pi<display.commands[ri].size();++pi) {
             json commands=json::array(),points=json::array();
@@ -210,7 +214,8 @@ json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, co
     std::map<int,std::string> nodeIds; for(const auto& n:shape.nodes) nodeIds[n.id]=n.uid;
     auto addStation=[&](const auto& st,const std::vector<int>& ris) {
         auto id=st.id.substr(0,st.id.find("_split_")); int internal=std::stoi(id);
-        json ids=json::array(); for(int ri:ris) ids.push_back(logicalId(shape.routes.at(ri)));
+        json ids=json::array(); for(int ri:ris) if(!shape.routes.at(ri).isObstacle)ids.push_back(logicalId(shape.routes.at(ri)));
+        if(ids.empty())return;
         stations.push_back({{"id",st.id},{"nodeId",nodeIds.at(internal)},{"point",point(screen(camera,st.pos))},{"routeIds",ids}});
     };
     for(const auto& st:display.normalStations) addStation(st,{st.routeIndex});
@@ -308,6 +313,448 @@ Shape loadMap(json map) {
     for(auto& n:shape.nodes)if(anchors.count(n.uid)){n.type=ShapeNodeType::ShapePoint;n.name.clear();n.station_id.clear();}
     return shape;
 }
+
+// Drawing uses the desktop Line/Region builders. Only the core turns pointer
+// samples into topology; background vertices never enter the transit Shape.
+std::vector<Point> drawingPoints(const json& req, const Camera& cam, bool keepDuplicates=false) {
+    const auto& input=req.at("points");
+    require(input.is_array()&&input.size()>=2&&input.size()<=1000,"Draw 2–1000 points");
+    std::vector<Point> points;
+    for(const auto& p:input) {
+        require(p.is_array()&&p.size()==2&&p[0].is_number()&&p[1].is_number(),"Expected [x,y] canvas points");
+        Point world=fromScreen(cam,{{"x",p[0]},{"y",p[1]}});
+        if(keepDuplicates||points.empty()||std::hypot(world.x-points.back().x,world.y-points.back().y)>1e-6/cam.getScale())points.push_back(world);
+    }
+    require(points.size()>=2,"Drawing needs two different points");
+    return points;
+}
+double along(Point p, Point a, Point b) {
+    const double dx=b.x-a.x,dy=b.y-a.y,len=dx*dx+dy*dy;
+    return len>0?((p.x-a.x)*dx+(p.y-a.y)*dy)/len:0;
+}
+Point at(Point a, Point b, double t) {return {a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t};}
+bool onEdge(Point p, Point a, Point b, double eps, double& t) {
+    t=along(p,a,b);auto q=at(a,b,std::clamp(t,0.0,1.0));
+    return std::hypot(p.x-q.x,p.y-q.y)<=eps;
+}
+bool crossing(Point a, Point b, Point c, Point d, Point& p) {
+    const double x=b.x-a.x,y=b.y-a.y,u=d.x-c.x,v=d.y-c.y,den=x*v-y*u;
+    if(std::abs(den)<=1e-12*std::hypot(x,y)*std::hypot(u,v))return false;
+    const double t=((c.x-a.x)*v-(c.y-a.y)*u)/den;
+    const double w=((c.x-a.x)*y-(c.y-a.y)*x)/den;
+    if(t<0||t>1||w<0||w>1)return false;
+    p=at(a,b,t);return true;
+}
+struct DrawnRoute {std::string id;std::vector<int> nodes;};
+DrawnRoute drawRoute(Shape& shape,const json& req,const Camera& cam) {
+    auto points=drawingPoints(req,cam,true);
+    const auto anchors=req.value("nodeIds",json::array());
+    require(anchors.is_array()&&(anchors.empty()||anchors.size()==points.size()),"nodeIds must match drawing points");
+    const double radius=number(req,"pickRadius",8,0,1000)/cam.getScale(),eps=1e-5/cam.getScale();
+    Line draft;
+    for(const auto& n:shape.nodes)draft.newRouteNextNodeId=std::max(draft.newRouteNextNodeId,n.id+1);
+    // Pointer tolerance is expressed in canvas units, supplied from the SVG
+    // transform so picking behaves consistently while zoomed.
+    for(size_t pointIndex=0;pointIndex<points.size();++pointIndex) {
+        auto p=points[pointIndex];
+        double best=radius;int nearest=-1;
+        // A clicked styled symbol may be offset from its topology position.
+        // Resolve its identity in C++, never infer a new station from that offset.
+        if(!anchors.empty()&&!anchors[pointIndex].is_null()) {
+            p=shape.nodes[nodeIndex(shape,anchors[pointIndex])].pos;
+        }
+        for(size_t n=0;n<shape.nodes.size();++n) {
+            const auto q=shape.nodes[n].pos;double distance=std::hypot(p.x-q.x,p.y-q.y);
+            if(distance<=best){best=distance;nearest=int(n);}
+        }
+        if(nearest>=0)p=shape.nodes[nearest].pos;
+        else {
+            if(req.value("snap",true)&&!draft.newRouteShape.nodes.empty()) {
+                const auto a=draft.newRouteShape.nodes.back().pos;
+                const double length=std::hypot(p.x-a.x,p.y-a.y),angle=std::round(std::atan2(p.y-a.y,p.x-a.x)/(pi/4))*(pi/4);
+                p={a.x+length*std::cos(angle),a.y+length*std::sin(angle)};
+            }
+            Point projected=p;best=radius;
+            for(const auto& e:shape.segments) {
+                const auto a=shape.nodes[e.a].pos,b=shape.nodes[e.b].pos;
+                auto q=at(a,b,std::clamp(along(p,a,b),0.0,1.0));double distance=std::hypot(p.x-q.x,p.y-q.y);
+                if(distance<=best){best=distance;projected=q;}
+            }
+            p=projected;
+        }
+        draft.addNewRoutePoint(p);
+    }
+    draft.finalizeNewRoute();
+    require(draft.newRouteShape.routes.size()==1,"Drawing needs two different stations");
+    auto route=draft.newRouteShape.routes.front();
+    auto exists=[&](const std::string& id){return std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==id;});};
+    route.id=req.value("routeId",std::string());
+    if(route.id.empty()){int i=1;do{route.id="drawn_route_"+std::to_string(i++);}while(exists(route.id));}
+    require(route.id.size()<=120&&!exists(route.id),"Route ID already exists or is too long");
+    route.name=req.value("name",std::string());if(route.name.empty())route.name=route.id;
+    const std::string hex=req.value("color",std::string("#3366b3"));
+    require(hex.size()==7&&hex[0]=='#'&&hex.find_first_not_of("0123456789abcdefABCDEF",1)==std::string::npos,"Expected #RRGGBB color");
+    for(int i=0;i<3;++i)route.color[i]=std::stoi(hex.substr(1+i*2,2),nullptr,16)/255.f;
+    route.segmentIndices.clear();
+    int nextInternal=draft.newRouteNextNodeId;
+    std::set<int> touched;
+    auto station=[&](Point p) {
+        for(size_t i=0;i<shape.nodes.size();++i)if(std::hypot(shape.nodes[i].pos.x-p.x,shape.nodes[i].pos.y-p.y)<=eps){touched.insert(int(i));return int(i);}
+        ShapeNode node;node.id=nextInternal++;node.type=ShapeNodeType::Station;node.pos=p;
+        node.name="Station "+std::to_string(node.id);shape.nodes.push_back(node);
+        touched.insert(int(shape.nodes.size())-1);return int(shape.nodes.size())-1;
+    };
+    std::vector<Point> vertices;for(const auto& n:draft.newRouteShape.nodes){vertices.push_back(n.pos);station(n.pos);}
+    // Crossings, T-junctions and collinear shared sections become real shared
+    // topology. All incidences of a split edge retain their route membership.
+    for(size_t i=1;i<vertices.size();++i) {
+        const auto a=vertices[i-1],b=vertices[i];Point hit;
+        for(const auto& e:shape.segments)if(crossing(a,b,shape.nodes[e.a].pos,shape.nodes[e.b].pos,hit))station(hit);
+        for(size_t j=1;j<i;++j)if(crossing(a,b,vertices[j-1],vertices[j],hit))station(hit);
+    }
+    auto chain=[&](Point a,Point b,const std::vector<int>& candidates) {
+        std::vector<std::pair<double,int>> result;
+        for(int n:candidates){double t;if(onEdge(shape.nodes[n].pos,a,b,eps,t))result.push_back({std::clamp(t,0.0,1.0),n});}
+        std::sort(result.begin(),result.end());return result;
+    };
+    std::vector<int> all;for(size_t n=0;n<shape.nodes.size();++n)all.push_back(int(n));
+    std::vector<std::vector<int>> paths;
+    for(size_t i=1;i<vertices.size();++i) {
+        std::vector<int> path;
+        for(const auto& entry:chain(vertices[i-1],vertices[i],all)) {
+            if(!path.empty()&&std::hypot(shape.nodes[path.back()].pos.x-shape.nodes[entry.second].pos.x,shape.nodes[path.back()].pos.y-shape.nodes[entry.second].pos.y)<=eps)continue;
+            path.push_back(entry.second);touched.insert(entry.second);
+        }
+        require(path.size()>=2,"Route contains a zero-length segment");paths.push_back(path);
+    }
+    const auto oldEdges=shape.segments;std::vector<std::vector<int>> replacements(oldEdges.size());
+    shape.segments.clear();std::map<std::pair<int,int>,int> edgeIds;
+    auto edge=[&](int a,int b){auto key=std::minmax(a,b);auto it=edgeIds.find(key);if(it!=edgeIds.end())return it->second;
+        int index=int(shape.segments.size());shape.segments.push_back({a,b,{}});edgeIds[key]=index;return index;};
+    const std::vector<int> candidates(touched.begin(),touched.end());
+    for(size_t i=0;i<oldEdges.size();++i) {
+        const auto e=oldEdges[i];auto ns=chain(shape.nodes[e.a].pos,shape.nodes[e.b].pos,candidates);
+        int last=e.a;
+        for(const auto& entry:ns)if(entry.first>0&&entry.first<1&&entry.second!=last){replacements[i].push_back(edge(last,entry.second));last=entry.second;}
+        replacements[i].push_back(edge(last,e.b));
+    }
+    for(auto& r:shape.routes){std::vector<int> indices;for(int e:r.segmentIndices)indices.insert(indices.end(),replacements[e].begin(),replacements[e].end());r.segmentIndices=indices;}
+    DrawnRoute result;result.id=route.id;
+    for(const auto& path:paths) {
+        for(size_t i=1;i<path.size();++i){int e=edge(path[i-1],path[i]);if(std::find(route.segmentIndices.begin(),route.segmentIndices.end(),e)==route.segmentIndices.end())route.segmentIndices.push_back(e);}
+        result.nodes.insert(result.nodes.end(),path.begin()+(result.nodes.empty()?0:1),path.end());
+        for(int n:path){auto& node=shape.nodes[n];node.type=ShapeNodeType::Station;if(node.name.empty())node.name="Station "+std::to_string(node.id);}
+    }
+    shape.routes.push_back(route);return result;
+}
+void drawFeature(json& state,const std::string& op,const json& req,const Camera& cam) {
+    auto points=drawingPoints(req,cam);const bool region=op=="draw-region-feature";
+    const double eps=1e-5/cam.getScale();
+    if(region&&std::hypot(points.front().x-points.back().x,points.front().y-points.back().y)<=eps)points.pop_back();
+    require(points.size()>=(region?3:2),region?"Region needs three different vertices":"Line needs two vertices");
+    if(region) {
+        double area=0;const auto origin=points.front();
+        for(size_t i=0;i<points.size();++i){auto a=points[i],b=points[(i+1)%points.size()];area+=(a.x-origin.x)*(b.y-origin.y)-(b.x-origin.x)*(a.y-origin.y);}
+        require(std::abs(area)>eps*eps,"Region must have non-zero area");
+        for(size_t i=0;i<points.size();++i)for(size_t j=i+1;j<points.size();++j) {
+            require(std::hypot(points[i].x-points[j].x,points[i].y-points[j].y)>eps,"Region has a repeated vertex");
+            if(j==i+1||(i==0&&j+1==points.size()))continue;
+            const auto a=points[i],b=points[(i+1)%points.size()],c=points[j],d=points[(j+1)%points.size()];Point hit;double t;
+            require(!crossing(a,b,c,d,hit)&&!onEdge(a,c,d,eps,t)&&!onEdge(b,c,d,eps,t)&&!onEdge(c,a,b,eps,t)&&!onEdge(d,a,b,eps,t),"Region edges must not intersect");
+        }
+    }
+    Line draft;Shape empty;
+    for(auto p:points)draft.addObstaclePoint(empty,p);
+    if(region)draft.addObstaclePoint(empty,points.front(),draft.obstacleDraftNodes.front());
+    draft.finalizeObstacleRoute();
+    auto built=region?draft.obstacleLoopRoutes:draft.obstacleNoLoopRoutes;
+    require(built.size()==1,"Invalid feature drawing");
+    if(region) {
+        Region polygon;std::vector<int> indices;
+        for(size_t i=0;i<points.size();++i){polygon.nodes.push_back(points[i]);polygon.segments.push_back({int(i),int((i+1)%points.size())});indices.push_back(int(i));}
+        polygon.segIdx.push_back(indices);std::vector<Point> loop;
+        require(buildRegionPolygonPoints(polygon,0,loop),"Cannot build region boundary");
+        built[0]=loop;if(!Geometry::samePoint(built[0].front(),built[0].back()))built[0].push_back(built[0].front());
+    }
+    const std::string hex=req.value("color",region?std::string("#b6d7a8"):std::string("#9bcde8"));
+    require(hex.size()==7&&hex[0]=='#'&&hex.find_first_not_of("0123456789abcdefABCDEF",1)==std::string::npos,"Expected #RRGGBB color");
+    json coords=json::array();for(auto p:built[0])coords.push_back(point(state.value("planar",false)?p:webMercToLonLat(p.x,p.y)));
+    auto& obstacles=state["obstacles"];if(!obstacles.is_object())obstacles=json::object();
+    obstacles["type"]="FeatureCollection";if(!obstacles.contains("features"))obstacles["features"]=json::array();
+    require(obstacles["features"].is_array()&&obstacles["features"].size()<100000,"Too many background features");
+    long long counter=state.value("nextFeatureId",1LL);std::string id;
+    do{id="drawn_feature_"+std::to_string(counter++);}while(std::any_of(obstacles["features"].begin(),obstacles["features"].end(),[&](const auto& f){return f.value("id",json())==id;}));
+    state["nextFeatureId"]=counter;
+    obstacles["features"].push_back({{"type","Feature"},{"id",id},
+        {"properties",{{"name",req.value("name",std::string())},{"featureKind",region?"region":"line"},{"color",hex},{"width",number(req,"width",region?1:30,0.1,1000)}}},
+        {"geometry",{{"type",region?"Polygon":"LineString"},{"coordinates",region?json::array({coords}):coords}}}});
+}
+
+// An OCTI transaction has a private graph containing transit + line features.
+// Region boundaries contribute intersection anchors, not transit routes. The
+// binding travels separately from OCTI, whose output discards custom metadata.
+struct LayoutNode {Point p;int original=-1;};
+struct LayoutEdge {int a,b;std::set<std::string> routes;};
+struct LayoutPrimitive {int a,b;std::string route;int transit=-1,feature=-1;};
+Point layoutWorld(const json& c,bool planar) {Point p{c.at(0),c.at(1)};return planar?p:lonlatToWebMerc(p.x,p.y);}
+json layoutCoordinate(Point p,bool planar){return point(planar?p:webMercToLonLat(p.x,p.y));}
+std::vector<Point> layoutPoints(const json& array,bool planar) {std::vector<Point> out;for(const auto& c:array)out.push_back(layoutWorld(c,planar));return out;}
+double layoutDistance(Point a,Point b){return std::hypot(a.x-b.x,a.y-b.y);}
+// Projection roundoff must not turn a shared straight boundary into a
+// transverse crossing. Collinear contacts are tested separately with onEdge.
+bool layoutCrossing(Point a,Point b,Point c,Point d,double eps,Point& hit) {
+    const double den=(b.x-a.x)*(d.y-c.y)-(b.y-a.y)*(d.x-c.x);
+    if(std::abs(den)<=eps*std::max(layoutDistance(a,b),layoutDistance(c,d)))return false;
+    return crossing(a,b,c,d,hit);
+}
+json prepareInsertionTopology(const Shape& shape,const json& state) {
+    const double eps=1e-5/cameraFor(state).getScale();
+    std::vector<LayoutNode> nodes;for(size_t n=0;n<shape.nodes.size();++n)nodes.push_back({shape.nodes[n].pos,int(n)});
+    auto node=[&](Point p){for(size_t i=0;i<nodes.size();++i)if(layoutDistance(p,nodes[i].p)<=eps)return int(i);nodes.push_back({p,-1});return int(nodes.size())-1;};
+    std::vector<LayoutPrimitive> primitives;
+    std::vector<std::set<std::string>> memberships(shape.segments.size());
+    for(const auto& r:shape.routes)for(int e:r.segmentIndices)memberships[e].insert(r.id);
+    for(size_t i=0;i<shape.segments.size();++i){const auto& e=shape.segments[i];bool feature=false;for(const auto& r:shape.routes)if(r.isObstacle&&memberships[i].count(r.id))feature=true;primitives.push_back({e.a,e.b,"",int(i),feature?0:-1});}
+    const auto obstacles=state.at("obstacles").value("features",json::array());
+    json featurePrimitives=json::object();std::set<std::string> routeIds;
+    for(const auto& r:shape.routes)routeIds.insert(r.id);
+    for(size_t i=0;i<obstacles.size();++i) {
+        const auto& f=obstacles[i];const auto props=f.value("properties",json::object());
+        if(props.value("featureKind","")!="line")continue;
+        if(routeIds.count(props.value("topologyRouteId",std::string())))continue;
+        require(f.at("geometry").at("type")=="LineString","Drawn line must be a LineString");
+        auto pts=layoutPoints(f["geometry"]["coordinates"],state.value("planar",false));
+        std::string id="__tm_line_"+std::to_string(i);while(routeIds.count(id))id+="_";routeIds.insert(id);
+        auto& list=featurePrimitives[std::to_string(i)];list=json::array();
+        for(size_t j=1;j<pts.size();++j) {
+            int a=node(pts[j-1]),b=node(pts[j]);if(a==b)continue;
+            list.push_back(primitives.size());primitives.push_back({a,b,id,-1,int(i)});
+        }
+        require(!list.empty(),"Line feature has no usable segments");
+    }
+    std::vector<std::vector<std::pair<double,int>>> splits(primitives.size());
+    for(size_t i=0;i<primitives.size();++i){const auto e=primitives[i];splits[i]={{0,e.a},{1,e.b}};}
+    auto split=[&](size_t i,Point p){const auto e=primitives[i];double t;if(onEdge(p,nodes[e.a].p,nodes[e.b].p,eps,t))splits[i].push_back({std::clamp(t,0.0,1.0),node(p)});};
+    // Apply the desktop obstacle-line rule: explicit shared junctions split
+    // every incident transit edge. Also retain overlapping feature sections.
+    for(size_t i=0;i<primitives.size();++i)for(size_t j=i+1;j<primitives.size();++j) {
+        const auto a=primitives[i],b=primitives[j];if(a.feature<0&&b.feature<0)continue;
+        const Point p=nodes[a.a].p,q=nodes[a.b].p,r=nodes[b.a].p,s=nodes[b.b].p;Point hit;
+        if(layoutCrossing(p,q,r,s,eps,hit)){split(i,hit);split(j,hit);}
+        split(i,r);split(i,s);split(j,p);split(j,q);
+    }
+    // Region contacts become durable A--contact--B constraints in the graph.
+    for(const auto& f:obstacles) {
+        if(f.value("properties",json::object()).value("featureKind","")!="region")continue;
+        require(f.at("geometry").at("type")=="Polygon","Drawn region must be a Polygon");
+        for(const auto& ring:f["geometry"]["coordinates"]) {
+            auto ps=layoutPoints(ring,state.value("planar",false));
+            for(size_t k=1;k<ps.size();++k)for(size_t i=0;i<primitives.size();++i) {
+                const auto e=primitives[i];Point hit;
+                if(layoutCrossing(ps[k-1],ps[k],nodes[e.a].p,nodes[e.b].p,eps,hit))split(i,hit);
+                split(i,ps[k-1]);split(i,ps[k]);
+            }
+        }
+    }
+    std::vector<LayoutEdge> edges;std::map<std::pair<int,int>,int> lookup;
+    json primitiveChains=json::array();
+    for(size_t i=0;i<primitives.size();++i) {
+        const auto p=primitives[i];auto entries=splits[i];std::sort(entries.begin(),entries.end());std::vector<int> chain;
+        for(auto entry:entries)if(chain.empty()||layoutDistance(nodes[chain.back()].p,nodes[entry.second].p)>eps)chain.push_back(entry.second);
+        require(chain.size()>=2,"OCTI input has a collapsed edge");primitiveChains.push_back(chain);
+        for(size_t j=1;j<chain.size();++j){auto key=std::minmax(chain[j-1],chain[j]);auto it=lookup.find(key);int ei;
+            if(it==lookup.end()){ei=edges.size();edges.push_back({chain[j-1],chain[j],{}});lookup[key]=ei;}else ei=it->second;
+            if(p.transit>=0)edges[ei].routes.insert(memberships[p.transit].begin(),memberships[p.transit].end());else edges[ei].routes.insert(p.route);
+        }
+    }
+    json binding={{"version",1},{"nodes",json::array()},{"edges",json::array()},
+        {"transitChains",json::array()},{"lineChains",json::object()},{"obstacles",state["obstacles"]},{"planar",state.value("planar",false)}};
+    for(const auto& n:nodes)binding["nodes"].push_back({{"position",point(n.p)},{"original",n.original}});
+    for(const auto& e:edges)binding["edges"].push_back({{"a",e.a},{"b",e.b},{"routes",e.routes}});
+    for(size_t i=0;i<shape.segments.size();++i)binding["transitChains"].push_back(primitiveChains[i]);
+    for(auto it=featurePrimitives.begin();it!=featurePrimitives.end();++it){std::vector<int> chain;
+        for(const auto& index:it.value()){auto part=primitiveChains[index.get<size_t>()].get<std::vector<int>>();chain.insert(chain.end(),part.begin()+(chain.empty()?0:1),part.end());}
+        binding["lineChains"][it.key()]=chain;
+    }
+    return binding;
+}
+Point layoutAlong(const std::vector<Point>& ps,double t) {
+    double length=0;for(size_t i=1;i<ps.size();++i)length+=layoutDistance(ps[i-1],ps[i]);
+    double d=std::clamp(t,0.0,1.0)*length;
+    for(size_t i=1;i<ps.size();++i){double l=layoutDistance(ps[i-1],ps[i]);if(d<=l&&l>0)return at(ps[i-1],ps[i],d/l);d-=l;}return ps.back();
+}
+// Affine moving least squares transfers the displacement field to free region
+// vertices. Shared contact vertices/edges bypass interpolation and use the
+// exact optimized graph path when station correspondences are available.
+Point layoutWarp(Point p,const std::vector<Point>& before,const std::vector<Point>& after,const json& edges,const std::vector<std::vector<Point>>& paths,double eps) {
+    for(size_t i=0;i<before.size();++i)if(layoutDistance(p,before[i])<=eps)return after[i];
+    for(size_t i=0;i<edges.size();++i){double t;if(onEdge(p,before[edges[i]["a"].get<int>()],before[edges[i]["b"].get<int>()],eps,t))return layoutAlong(paths[i],t);}
+    std::vector<double> weights;double sum=0;Point a{0,0},b{0,0};
+    for(size_t i=0;i<before.size();++i){double d=layoutDistance(p,before[i]);double w=1/std::max(eps*eps,d*d);weights.push_back(w);sum+=w;a.x+=w*before[i].x;a.y+=w*before[i].y;b.x+=w*after[i].x;b.y+=w*after[i].y;}
+    require(sum>0,"Region propagation has no anchors");a.x/=sum;a.y/=sum;b.x/=sum;b.y/=sum;
+    double xx=0,xy=0,yy=0,ux=0,uy=0,vx=0,vy=0;
+    for(size_t i=0;i<before.size();++i){double x=before[i].x-a.x,y=before[i].y-a.y,u=after[i].x-b.x,v=after[i].y-b.y,w=weights[i];xx+=w*x*x;xy+=w*x*y;yy+=w*y*y;ux+=w*u*x;uy+=w*u*y;vx+=w*v*x;vy+=w*v*y;}
+    const double det=xx*yy-xy*xy,dx=p.x-a.x,dy=p.y-a.y;
+    if(det>1e-12*(xx+yy)*(xx+yy))return {b.x+((ux*yy-uy*xy)*dx+(uy*xx-ux*xy)*dy)/det,b.y+((vx*yy-vy*xy)*dx+(vy*xx-vx*xy)*dy)/det};
+    const double norm=xx+yy;if(norm<=eps*eps)return {p.x+b.x-a.x,p.y+b.y-a.y};
+    const double c=(ux+vy)/norm,s=(vx-uy)/norm;return {b.x+c*dx-s*dy,b.y+s*dx+c*dy};
+}
+// Commit intersection splitting at draw time. This never runs on OCTI output.
+Shape commitInsertionTopology(json& state,const json& binding) {
+    Shape previous=decode(state.at("shape"));const auto& es=binding.at("edges");
+    std::vector<Point> after;for(const auto& n:binding["nodes"])after.push_back({n["position"][0],n["position"][1]});
+    const auto& before=after;
+    std::map<std::pair<int,int>,int> edgeIds;std::vector<std::vector<Point>> paths;
+    for(size_t i=0;i<es.size();++i){int a=es[i]["a"],b=es[i]["b"];edgeIds[std::minmax(a,b)]=i;paths.push_back({after[a],after[b]});}
+    auto obstacles=binding.at("obstacles");
+    // Rebuild only transit membership. Private feature anchors are ShapePoints;
+    // original station identity/type/name and route styles remain authoritative.
+    Shape next=previous;for(size_t i=0;i<previous.nodes.size();++i)next.nodes[i].pos=after[i];next.segments.clear();
+    std::vector<int> publicNodes(before.size(),-1);for(size_t i=0;i<previous.nodes.size();++i)publicNodes[i]=i;
+    auto publicNode=[&](int n){if(publicNodes[n]>=0)return publicNodes[n];ShapeNode v;v.pos=after[n];next.nodes.push_back(v);return publicNodes[n]=int(next.nodes.size())-1;};
+    std::map<int,std::vector<int>> publicPaths;std::vector<std::vector<int>> oldChains(previous.segments.size());
+    auto publicPath=[&](int ei){if(publicPaths.count(ei))return publicPaths[ei];std::vector<int> ns{publicNode(es[ei]["a"])};for(size_t k=1;k+1<paths[ei].size();++k){ShapeNode n;n.pos=paths[ei][k];next.nodes.push_back(n);ns.push_back(next.nodes.size()-1);}ns.push_back(publicNode(es[ei]["b"]));publicPaths[ei]=ns;return ns;};
+    std::map<std::pair<int,int>,int> publicEdges;std::vector<std::vector<int>> oldEdges(previous.segments.size());
+    for(size_t old=0;old<previous.segments.size();++old){auto chain=binding["transitChains"][old].get<std::vector<int>>();auto& ns=oldChains[old];for(size_t i=1;i<chain.size();++i){int ei=edgeIds.at(std::minmax(chain[i-1],chain[i]));auto part=publicPath(ei);if(es[ei]["a"]!=chain[i-1])std::reverse(part.begin(),part.end());ns.insert(ns.end(),part.begin()+(ns.empty()?0:1),part.end());}
+        for(size_t i=1;i<ns.size();++i){auto key=std::minmax(ns[i-1],ns[i]);auto it=publicEdges.find(key);int ei;if(it==publicEdges.end()){ei=next.segments.size();next.segments.push_back({ns[i-1],ns[i],{}});publicEdges[key]=ei;}else ei=it->second;oldEdges[old].push_back(ei);}}
+    for(auto& r:next.routes){std::vector<int> ids;for(int e:r.segmentIndices)ids.insert(ids.end(),oldEdges[e].begin(),oldEdges[e].end());r.segmentIndices=ids;}
+    // Persist drawn lines as real obstacle routes in Shape, including their
+    // shared intersection nodes. They are editable, but never metro stations.
+    for(auto it=binding["lineChains"].begin();it!=binding["lineChains"].end();++it) {
+        auto chain=it.value().get<std::vector<int>>();auto& feature=obstacles["features"][std::stoul(it.key())];
+        ShapeRoute route;int first=edgeIds.at(std::minmax(chain[0],chain[1]));
+        for(const auto& id:es[first]["routes"])if(std::none_of(previous.routes.begin(),previous.routes.end(),[&](const auto& r){return r.id==id;})){route.id=id;break;}
+        require(!route.id.empty(),"Missing feature route identity");
+        auto props=feature.value("properties",json::object());route.name=props.value("name",std::string("Line feature"));
+        route.isObstacle=true;route.obstacleKind=ObstacleKind::Line;route.route_width=props.value("width",12.f);
+        auto hex=props.value("color",std::string("#9bcde8"));for(int c=0;c<3;++c)route.color[c]=std::stoi(hex.substr(1+c*2,2),nullptr,16)/255.f;
+        for(size_t i=1;i<chain.size();++i){int ei=edgeIds.at(std::minmax(chain[i-1],chain[i]));auto ns=publicPath(ei);
+            for(size_t k=1;k<ns.size();++k){auto key=std::minmax(ns[k-1],ns[k]);auto found=publicEdges.find(key);int index;
+                if(found==publicEdges.end()){index=next.segments.size();next.segments.push_back({ns[k-1],ns[k],{}});publicEdges[key]=index;}else index=found->second;
+                if(std::find(route.segmentIndices.begin(),route.segmentIndices.end(),index)==route.segmentIndices.end())route.segmentIndices.push_back(index);}}
+        next.routes.push_back(route);feature["properties"]["topologyRouteId"]=route.id;
+    }
+    identities(next,state,&previous);state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
+    json directions=json::array();for(const auto& record:state.value("routeTraversals",json::array())){int found=-1;bool forward=true;for(size_t i=0;i<previous.segments.size();++i){const auto e=previous.segments[i];if(previous.nodes[e.a].uid==record["from"]&&previous.nodes[e.b].uid==record["to"]){found=i;break;}if(previous.nodes[e.b].uid==record["from"]&&previous.nodes[e.a].uid==record["to"]){found=i;forward=false;break;}}require(found>=0,"Cannot preserve a route traversal after OCTI");auto ns=oldChains[found];if(!forward)std::reverse(ns.begin(),ns.end());for(size_t i=1;i<ns.size();++i){auto r=record;r["from"]=next.nodes[ns[i-1]].uid;r["to"]=next.nodes[ns[i]].uid;directions.push_back(r);}}state["routeTraversals"]=directions;
+    if(state.contains("shapeTraversals")){auto& mapping=state["shapeTraversals"];for(auto& t:mapping["traversals"]){json ns=json::array(),ee=json::array();for(size_t i=0;i<t["orderedSegments"].size();++i){int old=segmentIndex(previous,t["orderedSegments"][i]);auto chain=oldChains[old];auto edges=oldEdges[old];if(previous.nodes[previous.segments[old].a].uid!=t["orderedNodes"][i]){std::reverse(chain.begin(),chain.end());std::reverse(edges.begin(),edges.end());}for(size_t k=ns.empty()?0:1;k<chain.size();++k)ns.push_back(next.nodes[chain[k]].uid);for(int e:edges)ee.push_back(next.segments[e].uid);}t["orderedNodes"]=ns;t["orderedSegments"]=ee;}mapping["revision"]=state["shapeRevision"];}
+    state["obstacles"]=obstacles;
+    // Fit both the optimized network and its propagated background together.
+    Camera cam;cam.resize(1200,800);GeoData data;Route bounds;for(auto p:after)bounds.segments.push_back({p});for(const auto& f:obstacles.value("features",json::array())){const auto kind=f.value("properties",json::object()).value("featureKind","");if(kind=="line"){auto parts=f["geometry"]["type"]=="MultiLineString"?f["geometry"]["coordinates"]:json::array({f["geometry"]["coordinates"]});for(const auto& part:parts)for(auto p:layoutPoints(part,binding.value("planar",false)))bounds.segments.push_back({p});}if(kind=="region")for(const auto& ring:f["geometry"]["coordinates"])for(auto p:layoutPoints(ring,binding.value("planar",false)))bounds.segments.push_back({p});}data.routes.push_back(bounds);cam.fitToData(data);auto center=cam.screenToWorld(600,400);state["transform"]={{"x",center.x},{"y",center.y},{"scale",cam.getScale()}};
+    return next;
+}
+
+void syncFeatureGeometry(const Shape& shape,json& state) {
+    auto canonical=Shape2StyleShape(shape);json retained=json::array();
+    for(auto f:state["obstacles"].value("features",json::array())) {
+        const auto id=f.value("properties",json::object()).value("topologyRouteId",std::string());
+        if(id.empty()){retained.push_back(f);continue;}
+        auto r=std::find_if(shape.routes.begin(),shape.routes.end(),[&](const auto& route){return route.id==id;});
+        if(r==shape.routes.end())continue;
+        json paths=json::array();for(const auto& path:canonical.route_path_topology[r-shape.routes.begin()]){json ps=json::array();for(int n:path.nodes)ps.push_back(layoutCoordinate(shape.nodes[n].pos,state.value("planar",false)));if(ps.size()>1)paths.push_back(ps);}
+        if(paths.empty())continue;
+        f["geometry"]={{"type",paths.size()==1?"LineString":"MultiLineString"},{"coordinates",paths.size()==1?paths[0]:paths}};retained.push_back(f);
+    }
+    state["obstacles"]["features"]=retained;
+}
+Shape integrateFeatures(Shape shape,json& state) {
+    const auto transform=state["transform"];auto canonical=Shape2StyleShape(shape);
+    state["shape"]=encode(shape,cameraFor(state),canonical,state);
+    auto binding=prepareInsertionTopology(shape,state);
+    auto result=commitInsertionTopology(state,binding);
+    state["transform"]=transform;syncFeatureGeometry(result,state);return result;
+}
+
+// Follow the desktop RUN pipeline: regular Shape exporter -> unmodified OCTI
+// -> regular loader. Only semantic/style metadata is restored on the result.
+json nativeLayoutInput(const Shape& shape) {
+    auto graph=shapeToLoomGeoJson(shape,true);
+    for(auto& f:graph["features"])if(f["geometry"]["type"]=="Point") {
+        auto& p=f["properties"];
+        if(p.value("kind",std::string())=="station"&&!p.contains("station_id"))p["station_id"]=p["id"];
+    }
+    return {{"map",graph}};
+}
+std::vector<Point> nativeRoutePath(const Shape& shape,const ShapeRoute& route,int from,int to) {
+    std::vector<std::vector<int>> adj(shape.nodes.size());for(int e:route.segmentIndices){adj[shape.segments[e].a].push_back(shape.segments[e].b);adj[shape.segments[e].b].push_back(shape.segments[e].a);}
+    std::vector<double> dist(shape.nodes.size(),1e100);std::vector<int> prev(shape.nodes.size(),-1);std::set<std::pair<double,int>> queue;
+    dist[from]=0;queue.insert({0,from});
+    while(!queue.empty()){auto [d,n]=*queue.begin();queue.erase(queue.begin());if(n==to)break;if(d!=dist[n])continue;
+        for(int k:adj[n]){double nd=d+layoutDistance(shape.nodes[n].pos,shape.nodes[k].pos);if(nd<dist[k]){queue.erase({dist[k],k});dist[k]=nd;prev[k]=n;queue.insert({nd,k});}}}
+    if(from!=to&&prev[to]<0)return {};
+    std::vector<Point> result;for(int n=to;n>=0;n=prev[n]){result.push_back(shape.nodes[n].pos);if(n==from)break;}std::reverse(result.begin(),result.end());return result;
+}
+std::vector<Point> nativePathInterval(const std::vector<Point>& path,double start,double end) {
+    double len=0;for(size_t k=1;k<path.size();++k)len+=layoutDistance(path[k-1],path[k]);
+    std::vector<Point> result{layoutAlong(path,start)};double d=0;
+    for(size_t k=1;k<path.size();++k){d+=layoutDistance(path[k-1],path[k]);if(d>start*len&&d<end*len)result.push_back(path[k]);}
+    result.push_back(layoutAlong(path,end));return result;
+}
+Shape applyNativeLayout(json& state,json output) {
+    const auto previous=decode(state.at("shape"));
+    for(auto& f:output["features"])if(f["geometry"]["type"]=="LineString")for(auto& line:f["properties"]["lines"]){
+        auto old=std::find_if(previous.routes.begin(),previous.routes.end(),[&](const auto& r){return r.id==identifier(line["id"]);});
+        if(old!=previous.routes.end()){line["name"]=old->name;line["label"]=old->name;line["color"]=color(old->color).substr(1);line["route_width"]=old->route_width;}}
+    Shape next=loadMap(output);
+    for(auto& route:next.routes){auto old=std::find_if(previous.routes.begin(),previous.routes.end(),[&](const auto& r){return r.id==route.id;});
+        if(old!=previous.routes.end()){route.name=old->name;route.route_width=old->route_width;route.isObstacle=old->isObstacle;route.obstacleKind=old->obstacleKind;for(int c=0;c<3;++c)route.color[c]=old->color[c];}}
+    // Feature-only nodes stay ShapePoints, including optimizer-added bends.
+    std::vector<bool> transit(next.nodes.size(),false),feature(next.nodes.size(),false);
+    for(const auto& route:next.routes)for(int e:route.segmentIndices)for(int n:{next.segments[e].a,next.segments[e].b})(route.isObstacle?feature:transit)[n]=true;
+    for(size_t i=0;i<next.nodes.size();++i)if(feature[i]&&!transit[i]){next.nodes[i].type=ShapeNodeType::ShapePoint;next.nodes[i].name.clear();next.nodes[i].station_id.clear();}
+    // Regions follow the resulting layout, without changing optimizer geometry.
+    std::vector<Point> before,after;std::map<int,int> matched;
+    std::map<std::string,int> stationIds;
+    for(size_t i=0;i<next.nodes.size();++i)if(next.nodes[i].type==ShapeNodeType::Station&&!next.nodes[i].station_id.empty())stationIds[next.nodes[i].station_id]=i;
+    for(size_t i=0;i<previous.nodes.size();++i)if(previous.nodes[i].type==ShapeNodeType::Station){const auto& n=previous.nodes[i];auto it=stationIds.find(n.station_id.empty()?n.uid:n.station_id);
+        if(it!=stationIds.end()){matched[i]=it->second;before.push_back(n.pos);after.push_back(next.nodes[it->second].pos);}}
+    json edges=json::array();std::vector<std::vector<Point>> paths;
+    auto oldCanonical=Shape2StyleShape(previous);
+    for(size_t ri=0;ri<previous.routes.size();++ri){auto route=std::find_if(next.routes.begin(),next.routes.end(),[&](const auto& r){return r.id==previous.routes[ri].id;});if(route==next.routes.end())continue;
+        for(const auto& chain:oldCanonical.route_path_topology[ri]){int start=-1;
+            for(size_t k=0;k<chain.nodes.size();++k)if(matched.count(chain.nodes[k])){
+                if(start>=0){auto path=nativeRoutePath(next,*route,matched.at(chain.nodes[start]),matched.at(chain.nodes[k]));
+                    double length=0;for(size_t j=start+1;j<=k;++j)length+=layoutDistance(previous.nodes[chain.nodes[j-1]].pos,previous.nodes[chain.nodes[j]].pos);
+                    if(path.size()>1&&length>0){double d=0;
+                        for(size_t j=start+1;j<=k;++j){auto a=previous.nodes[chain.nodes[j-1]].pos,b=previous.nodes[chain.nodes[j]].pos;double end=d+layoutDistance(a,b);auto part=nativePathInterval(path,d/length,end/length);
+                            int ai=before.size();before.push_back(a);after.push_back(part.front());int bi=before.size();before.push_back(b);after.push_back(part.back());edges.push_back({{"a",ai},{"b",bi}});paths.push_back(part);d=end;}}
+                }start=k;}
+        }
+    }
+    double regionStep=1; if(!before.empty()){auto lo=before.front(),hi=lo;for(auto p:before){lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);}regionStep=std::max(1e-6,layoutDistance(lo,hi)/100);}
+    for(auto& f:state["obstacles"]["features"])if(f.value("properties",json::object()).value("featureKind","")=="region"){
+        require(!before.empty(),"Region propagation needs matching network stations");
+        for(auto& ring:f["geometry"]["coordinates"]){auto original=layoutPoints(ring,state.value("planar",false));json mapped=json::array();
+            for(size_t i=1;i<original.size();++i){auto a=original[i-1],b=original[i];std::vector<double> ts;int samples=std::clamp(int(std::ceil(layoutDistance(a,b)/regionStep)),1,16);for(int k=0;k<samples;++k)ts.push_back(double(k)/samples);
+                for(const auto& e:edges){Point hit;if(layoutCrossing(a,b,before[e["a"].get<int>()],before[e["b"].get<int>()],1e-6,hit))ts.push_back(std::clamp(along(hit,a,b),0.0,1.0));}
+                std::sort(ts.begin(),ts.end());for(double t:ts)if(t<1)mapped.push_back(layoutCoordinate(layoutWarp(at(a,b,t),before,after,edges,paths,1e-6),state.value("planar",false)));}
+            if(!mapped.empty())mapped.push_back(mapped.front());ring=mapped;
+        }
+    }
+    state["pathIds"]=json::object();identities(next,state);state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
+    // Default OCTI contracts ShapePoints. Compose explicit directed records
+    // through those removed vertices before expanding them onto native paths.
+    auto records=state.value("routeTraversals",json::array());json composed=json::array();
+    std::set<std::string> surviving;for(const auto& entry:matched)surviving.insert(previous.nodes[entry.first].uid);
+    std::map<std::pair<std::string,std::string>,std::vector<size_t>> outgoing;
+    for(size_t i=0;i<records.size();++i)outgoing[{records[i]["routeId"].get<std::string>(),records[i]["from"].get<std::string>()}].push_back(i);
+    std::set<std::string> emitted;
+    for(const auto& record:records)if(surviving.count(record["from"].get<std::string>())) {
+        const auto route=record["routeId"].get<std::string>(),start=record["from"].get<std::string>();
+        std::vector<std::string> pending{record["to"].get<std::string>()};std::set<std::string> seen;
+        while(!pending.empty()){auto n=pending.back();pending.pop_back();if(!seen.insert(n).second)continue;
+            if(surviving.count(n)){if(n!=start){auto r=record;r["to"]=n;if(emitted.insert(r.dump()).second)composed.push_back(r);}continue;}
+            for(size_t i:outgoing[{route,n}])pending.push_back(records[i]["to"].get<std::string>());
+        }
+    }
+    auto directionSource=previous;for(auto& n:directionSource.nodes)if(n.type==ShapeNodeType::Station&&n.station_id.empty())n.station_id=n.uid;
+    state["routeTraversals"]=remapRouteDirections(directionSource,next,composed);
+    state.erase("shapeTraversals");if(state.contains("directionalData"))state["shapeTraversals"]=mapGtfsDirections(next,state["directionalData"],state["shapeRevision"]);
+    syncFeatureGeometry(next,state);
+    Camera cam;cam.resize(1200,800);GeoData data;Route bounds;for(const auto& n:next.nodes)bounds.segments.push_back({n.pos});data.routes.push_back(bounds);cam.fitToData(data);auto center=cam.screenToWorld(600,400);
+    state["transform"]={{"x",center.x},{"y",center.y},{"scale",cam.getScale()}};
+    return next;
+}
+
 void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     if(op=="move-node") {
         int n=nodeIndex(s,req.at("nodeId")); Point proposed=fromScreen(cam,req);
@@ -317,7 +764,12 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     } else if(op=="merge-stations") {
         std::vector<int> ns;for(const auto& id:req.at("nodeIds"))ns.push_back(nodeIndex(s,id));
         require(ns.size()>=2,"Select at least two stations");
-        require(mergeStations(s,ns,req.value("name",s.nodes[ns[0]].name),req.value("stationId",s.nodes[ns[0]].station_id)),"Merge failed");
+        std::sort(ns.begin(),ns.end());const auto keep=s.nodes[ns.front()].uid;
+        bool station=false;std::string name,stationId;
+        for(int n:ns)if(s.nodes[n].type==ShapeNodeType::Station){station=true;name=s.nodes[n].name;stationId=s.nodes[n].station_id;break;}
+        for(int n:ns)s.nodes[n].type=ShapeNodeType::Station;
+        require(mergeStations(s,ns,station?req.value("name",name):"",station?req.value("stationId",stationId):""),"Merge failed");
+        auto& merged=s.nodes[nodeIndex(s,keep)];merged.type=station?ShapeNodeType::Station:ShapeNodeType::ShapePoint;
     } else if(op=="split-station") {
         int n=nodeIndex(s,req.at("nodeId"));std::vector<char> mask(s.routes.size(),0);
         for(const auto& id:req.at("routeIds"))mask[routeIndex(s,id)]=1;
@@ -389,8 +841,10 @@ json transitCoreRequest(const json& request) {
         state["transform"]={{"x",center.x},{"y",center.y},{"scale",cam.getScale()}};
         state["planar"]=map.value("coordinateSystem",std::string("auto"))=="planar";
         state["obstacles"]=request.value("obstacles",map.value("transitMapObstacles",json{{"type","FeatureCollection"},{"features",json::array()}}));
-    } else shape=decode(state.at("shape"));
+    } else if(op=="loom-apply")shape=applyNativeLayout(state,request.at("map"));
+    else shape=decode(state.at("shape"));
     auto cam=cameraFor(state);
+    if(op=="loom-export")return nativeLayoutInput(shape);
     if(op=="export" || op=="loom-export") {
         auto graph=shapeToLoomGeoJson(shape);
         // Existing exporter writes lon/lat; planar imports explicitly retain
@@ -410,19 +864,35 @@ json transitCoreRequest(const json& request) {
             if(state.contains("directionalData")) {
                 if(!state.contains("shapeTraversals"))state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state.value("shapeRevision",0ULL));
                 exportShapeTraversals(graph,shape,state["shapeTraversals"],state.value("shapeRevision",0ULL));
-            } else exportRouteDirections(graph,state.value("routeTraversals",json::array()));
+            }
+            exportRouteDirections(graph,state.value("routeTraversals",json::array()));
         }
         graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
-    if(op!="session" && op!="replace-map") {
-        Shape before=shape;edit(shape,op,request,cam);identities(shape,state,&before);
-        if(op!="render-geometry" && op!="move-node") {
+    if(op!="session" && op!="replace-map" && op!="loom-apply") {
+        Shape before=shape;DrawnRoute drawn;
+        const bool feature=op=="draw-line-feature"||op=="draw-region-feature";
+        if(op=="draw-route")drawn=drawRoute(shape,request,cam);
+        else if(feature)drawFeature(state,op,request,cam);
+        else edit(shape,op,request,cam);
+        identities(shape,state,&before);
+        if(op!="render-geometry" && op!="move-node" && !feature) {
             state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
             if(state.contains("directionalData"))
                 state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
-            else state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op,request);
+            state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op=="draw-route"?"split-segment":op,request);
+            if(op=="draw-route")for(size_t i=1;i<drawn.nodes.size();++i)
+                state["routeTraversals"].push_back({{"routeId",drawn.id},{"from",shape.nodes[drawn.nodes[i-1]].uid},{"to",shape.nodes[drawn.nodes[i]].uid}});
         }
     }
+    if(op=="draw-line-feature"||op=="draw-region-feature"||op=="draw-route")shape=integrateFeatures(shape,state);
+    // Imported line membership is flagged using its persisted obstacle record.
+    for(const auto& f:state["obstacles"].value("features",json::array())){auto props=f.value("properties",json::object());auto id=props.value("topologyRouteId",std::string());for(auto& r:shape.routes)if(r.id==id){r.isObstacle=true;r.obstacleKind=ObstacleKind::Line;}}
+    if(op=="session"||op=="replace-map") {
+        const auto& features=state["obstacles"]["features"];
+        if(std::any_of(features.begin(),features.end(),[](const auto& f){auto p=f.value("properties",json::object());return p.value("featureKind",std::string())=="line"&&!p.contains("topologyRouteId");}))shape=integrateFeatures(shape,state);
+    }
+    syncFeatureGeometry(shape,state);
     validate(shape);
     auto selected=request.value("bidirectionalRoutes",state.value("bidirectionalRoutes",json::array()));
     require(selected.is_array(),"bidirectionalRoutes must be an array");
