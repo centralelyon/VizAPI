@@ -19,7 +19,7 @@ IDENTIFIER = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 UI_ACTIONS = {'session-start', 'style-change', 'style-select', 'mode-change',
               'edit-mode', 'side-change', 'snap-change', 'undo', 'redo'}
 OPERATIONS = {'move-node', 'delete-node', 'merge-stations', 'split-station',
-              'split-segment', 'add-station', 'add-route', 'delete-route',
+              'split-segment', 'add-station', 'add-route', 'update-routes', 'delete-route',
               'restore', 'loom', 'upload', 'draw-route', 'draw-line-feature', 'draw-region-feature'}
 
 
@@ -277,7 +277,7 @@ def operation_event(operation, body, before, result, elapsed, failed=False):
     names = {'loom':'octi', 'restore':'restore-original', 'merge-stations':'merge-interchange',
              'split-station':'split-interchange', 'delete-node':'delete-node', 'render-geometry':'bidirectional-change'}
     event['action'] = names.get(operation, operation)
-    for key in ('nodeId', 'nodeIds', 'segmentId', 'segmentIds', 'routeId', 'routeIds', 'name'):
+    for key in ('nodeId', 'nodeIds', 'segmentId', 'segmentIds', 'routeId', 'routeIds', 'routes', 'name'):
         if key in body:
             event[key] = body[key]
     before_nodes = {n['id']: n for n in before.get('shape', {}).get('nodes', [])}

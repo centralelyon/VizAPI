@@ -755,6 +755,60 @@ Shape applyNativeLayout(json& state,json output) {
     return next;
 }
 
+// Render background boundaries through the same C++ bend engine as routes.
+// These temporary paths never enter the authoritative topology or OCTI input.
+json featureCommands(const json& state,const json& style,const Camera& cam) {
+    json result=json::object();size_t fi=0;
+    for(const auto& f:state.at("obstacles").value("features",json::array())) {
+        auto props=f.value("properties",json::object());auto kind=props.value("featureKind",std::string());
+        auto id=std::to_string(fi++);if(kind!="line"&&kind!="region")continue;
+        const auto& g=f.at("geometry");auto parts=g["type"]=="LineString"?json::array({g["coordinates"]}):g["coordinates"];
+        json commands=json::array();
+        for(const auto& part:parts) {
+            auto points=layoutPoints(part,state.value("planar",false));bool closed=kind=="region";
+            if(closed&&points.size()>1&&layoutDistance(points.front(),points.back())<1e-9)points.pop_back();
+            if(points.size()<2)continue;
+            // Put the closed-path seam on a straight edge so every polygon
+            // corner is an interior bend in the route command generator.
+            if(closed)points.insert(points.begin(),Point{(points.front().x+points.back().x)/2,(points.front().y+points.back().y)/2});
+            Shape boundary;ShapeRoute route{};route.id="boundary";route.name="boundary";
+            for(size_t i=0;i<points.size();++i){ShapeNode n;n.id=i;n.uid=std::to_string(i);n.pos=points[i];boundary.nodes.push_back(n);
+                if(i){route.segmentIndices.push_back(boundary.segments.size());boundary.segments.push_back({int(i-1),int(i),{}});}}
+            if(closed){route.segmentIndices.push_back(boundary.segments.size());boundary.segments.push_back({int(points.size()-1),0,{}});}
+            boundary.routes.push_back(route);auto styled=Shape2StyleShape(boundary);
+            geometryStyle(styled,boundary,{{"routes",{{"boundary",style.value("featureStyle",json::object())}}}});
+            auto display=buildStyledShapeDisplayData(styled,cam);
+            for(const auto& path:display.commands[0]){
+                for(const auto& c:path){json v={{"type",c.type==RenderCommand::Type::Move?"move":c.type==RenderCommand::Type::Line?"line":"quadratic"},{"x",c.end.x},{"y",800-c.end.y}};
+                    if(c.type==RenderCommand::Type::Quadratic){v["cx"]=c.control.x;v["cy"]=800-c.control.y;}commands.push_back(v);}
+                if(closed)commands.push_back({{"type","close"}});
+            }
+        }
+        result[id]=commands;
+    }
+    return result;
+}
+void updateRoutes(Shape& shape,json& state,const json& request) {
+    const auto& changes=request.at("routes");require(changes.is_array()&&!changes.empty(),"No route changes");
+    std::map<std::string,std::string> ids,names;
+    for(const auto& c:changes){auto old=identifier(c.at("routeId")),id=identifier(c.at("id"));routeIndex(shape,old);require(!id.empty()&&id.size()<=256&&id.find_first_not_of(" \t\r\n")!=std::string::npos,"Route ID must be non-empty and at most 256 characters");require(!ids.count(old),"Repeated route update");ids[old]=id;names[old]=c.value("name",id);}
+    std::set<std::string> used;for(const auto& r:shape.routes)require(used.insert(ids.count(r.id)?ids.at(r.id):r.id).second,"Route ID already exists");
+    // Rewrite only semantic route references, preserving stop IDs and geometry.
+    auto rewrite=[&](auto&& self,json& value)->void {
+        if(value.is_array()){for(auto& x:value)self(self,x);return;}if(!value.is_object())return;
+        for(auto it=value.begin();it!=value.end();++it){
+            if((it.key()=="routeId"||it.key()=="logicalRouteId"||it.key()=="topologyRouteId")&&it.value().is_string()&&ids.count(it.value().get<std::string>()))it.value()=ids.at(it.value().get<std::string>());
+            else if((it.key()=="routeIds"||it.key()=="bidirectionalRoutes")&&it.value().is_array()){for(auto& id:it.value())if(id.is_string()&&ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());}
+            else self(self,it.value());
+        }
+    };
+    for(const auto* key:{"directionalData","shapeTraversals","routeTraversals","obstacles"})if(state.contains(key))rewrite(rewrite,state[key]);
+    for(auto& id:state["bidirectionalRoutes"])if(ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());
+    for(auto& st:state["styles"]){auto old=st.value("routes",json::object()),next=json::object();for(auto it=old.begin();it!=old.end();++it)next[ids.count(it.key())?ids.at(it.key()):it.key()]=it.value();st["routes"]=next;
+        for(auto& pair:st["pairs"])for(const auto* k:{"a","b"})if(ids.count(pair[k].get<std::string>()))pair[k]=ids.at(pair[k].get<std::string>());}
+    for(auto& r:shape.routes)if(ids.count(r.id)){auto old=r.id;r.id=ids.at(old);r.name=names.at(old);}
+}
+
 void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     if(op=="move-node") {
         int n=nodeIndex(s,req.at("nodeId")); Point proposed=fromScreen(cam,req);
@@ -869,7 +923,8 @@ json transitCoreRequest(const json& request) {
         }
         graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
-    if(op!="session" && op!="replace-map" && op!="loom-apply") {
+    if(op=="update-routes"){state["styles"]=request.value("styles",state.value("styles",json::object()));updateRoutes(shape,state,request);}
+    if(op!="session" && op!="replace-map" && op!="loom-apply" && op!="update-routes") {
         Shape before=shape;DrawnRoute drawn;
         const bool feature=op=="draw-line-feature"||op=="draw-region-feature";
         if(op=="draw-route")drawn=drawRoute(shape,request,cam);
@@ -908,7 +963,7 @@ json transitCoreRequest(const json& request) {
     auto canonical=Shape2StyleShape(shape);
     auto topology=encode(shape,cam,canonical,state);state["shape"]=topology;
     // Two comparison styles share one authoritative topology/revision.
-    auto styles=request.value("styles",state.value("styles",json::object()));
+    auto styles=op=="update-routes"?state["styles"]:request.value("styles",state.value("styles",json::object()));
     if(request.contains("style"))styles["right"]=request["style"];
     state["styles"]=styles;json scenes=json::object();
     Shape renderShape;StyledShape renderCanonical;json renderTopology;
@@ -937,6 +992,7 @@ json transitCoreRequest(const json& request) {
         st["pairs"]=retained;scenes[it.key()]=sceneFor(st);
     }
     if(scenes.empty())scenes["right"]=sceneFor(json::object());
+    for(auto it=scenes.begin();it!=scenes.end();++it)it.value()["features"]=featureCommands(state,styles.value(it.key(),json::object()),cam);
     json obstacles=json::array();size_t i=0;
     for(const auto& f:state["obstacles"].value("features",json::array())) {
         auto props=f.value("properties",json::object()); if(!props.is_object())props=json::object();
