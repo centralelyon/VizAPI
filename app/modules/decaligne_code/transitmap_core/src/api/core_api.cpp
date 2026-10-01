@@ -8,6 +8,7 @@
 #include "render/render_geometry.h"
 #include "obs/line.h"
 #include "obs/region.h"
+#include "obs/region_deformation.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -189,8 +190,8 @@ void geometryStyle(StyledShape& s, const Shape& shape, const json& style) {
                 s.routes_spacing[a][b]=s.routes_spacing[b][a]=a==b?0:gap;
     }
 }
-json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, const json& topology) {
-    auto display=buildStyledShapeDisplayData(s,camera); json routes=json::array(),stations=json::array();
+json rendered(const Shape& shape, const StyledShape& s, const Camera& camera, const json& topology, double spacingScale=1.0) {
+    auto display=buildStyledShapeDisplayData(s,camera,spacingScale); json routes=json::array(),stations=json::array();
     for(size_t ri=0;ri<shape.routes.size();++ri) {
         if(shape.routes[ri].isObstacle)continue;
         json paths=json::array();
@@ -788,6 +789,162 @@ json featureCommands(const json& state,const json& style,const Camera& cam) {
     }
     return result;
 }
+// Region editing runs in canvas units, just like desktop interaction, then
+// converts back to the map CRS. The view camera is never refitted by a drag.
+Region editableRegions(const json& state,const Camera& cam) {
+    Region region;
+    for(const auto& f:state.at("obstacles").at("features")) {
+        if(f.value("properties",json::object()).value("featureKind","")!="region")continue;
+        require(f.at("geometry").at("type")=="Polygon","Region must be a Polygon");
+        require(f["geometry"]["coordinates"].size()==1,"Region editing requires a single outer boundary");
+        auto ps=layoutPoints(f["geometry"]["coordinates"][0],state.value("planar",false));
+        if(ps.size()>1&&layoutDistance(ps.front(),ps.back())<1e-8)ps.pop_back();
+        require(ps.size()>=3,"Region needs three vertices");
+        int start=region.nodes.size();std::vector<int> edges;
+        for(auto p:ps)region.nodes.push_back(screen(cam,p));
+        for(int i=0;i<int(ps.size());++i){edges.push_back(region.segments.size());region.segments.push_back({start+i,start+(i+1)%int(ps.size())});}
+        region.segIdx.push_back(edges);
+    }
+    return region;
+}
+void storeRegions(json& state,const Region& region,const Camera& cam) {
+    int polygon=0;
+    for(auto& f:state["obstacles"]["features"]) {
+        if(f.value("properties",json::object()).value("featureKind","")!="region")continue;
+        std::vector<Point> loop;require(buildRegionPolygonPoints(region,polygon++,loop),"Invalid region boundary");
+        json coords=json::array();for(auto p:loop)coords.push_back(layoutCoordinate(cam.screenToWorld(p.x,800-p.y),state.value("planar",false)));
+        if(coords.front()!=coords.back())coords.push_back(coords.front());
+        f["geometry"]["coordinates"]=json::array({coords});
+    }
+}
+bool strictlyInsideRegion(Point p,const std::vector<Point>& polygon) {
+    if(!Geometry::pointInPolygon(p,polygon))return false;
+    for(size_t i=0;i<polygon.size();++i) {
+        auto a=polygon[i],b=polygon[(i+1)%polygon.size()];
+        double dx=b.x-a.x,dy=b.y-a.y,d=dx*dx+dy*dy;
+        double t=d>1e-12?std::clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/d,0.0,1.0):0;
+        if(std::hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)<1e-6)return false;
+    }
+    return true;
+}
+void pushOutside(Shape& shape,const Region& region) {
+    std::vector<std::vector<Point>> polygons;buildRegionPolygons(region,polygons);
+    for(auto& node:shape.nodes) {
+        // A zero direction selects the nearest boundary in the desktop helper.
+        // Boundary contacts stay put, avoiding round-trip floating-point drift.
+        for(size_t pass=0;pass<polygons.size()*4+1;++pass) {
+            bool moved=false;
+            for(const auto& polygon:polygons)if(strictlyInsideRegion(node.pos,polygon)) {
+                node.pos=movePointOutsideRegionPolygonsAlongDirection(node.pos,{polygon},{0,0});moved=true;
+            }
+            if(!moved)break;
+        }
+        for(const auto& polygon:polygons)require(!strictlyInsideRegion(node.pos,polygon),"Overlapping regions leave no nearby free position");
+    }
+}
+void alignNearbyRegions(Region& region,const Shape& shape) {
+    // Use the nearest transit direction within 100 canvas units as the local
+    // octilinear frame, then reuse the desktop boundary alignment routine.
+    for(size_t i=0;i<region.segIdx.size();++i) {
+        std::vector<int> loop;buildRegionLoopNodeIndices(region,int(i),loop);
+        if(loop.size()>1&&loop.front()==loop.back())loop.pop_back();
+        double best=100.0,angle=0;
+        for(const auto& route:shape.routes)if(!route.isObstacle)for(int e:route.segmentIndices) {
+            const auto& edge=shape.segments[e];auto a=shape.nodes[edge.a].pos,b=shape.nodes[edge.b].pos;
+            double dx=b.x-a.x,dy=b.y-a.y,len2=dx*dx+dy*dy;if(len2<1e-8)continue;
+            for(int n:loop){auto p=region.nodes[n];double t=std::clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/len2,0.0,1.0);
+                double d=std::hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);
+                if(d<best){best=d;angle=std::remainder(std::atan2(dy,dx),pi/4);}}
+        }
+        Region local;Point origin=region.nodes[loop.front()];
+        auto rotate=[](Point p,double a){return Point{p.x*std::cos(a)-p.y*std::sin(a),p.x*std::sin(a)+p.y*std::cos(a)};};
+        std::vector<int> edges;
+        for(int n:loop){auto p=region.nodes[n];local.nodes.push_back(rotate({p.x-origin.x,p.y-origin.y},-angle));}
+        for(int n=0;n<int(loop.size());++n){edges.push_back(n);local.segments.push_back({n,(n+1)%int(loop.size())});}local.segIdx.push_back(edges);
+        refineRegionToOctilinear(local);
+        for(size_t n=0;n<loop.size();++n){auto p=rotate(local.nodes[n],angle);region.nodes[loop[n]]={origin.x+p.x,origin.y+p.y};}
+    }
+}
+void preserveRegionTopology(const Shape& before,const Shape& after) {
+    // A refinement may subdivide an edge, but may never merge separate edges
+    // at a coincident bend (the desktop splitter normally permits that).
+    require(after.nodes.size()>=before.nodes.size(),"Region Apply removed a network node");
+    const int count=before.nodes.size();
+    std::vector<std::vector<int>> adj(after.nodes.size());
+    for(size_t i=0;i<after.segments.size();++i){const auto& e=after.segments[i];adj[e.a].push_back(i);adj[e.b].push_back(i);}
+    for(size_t n=count;n<adj.size();++n)require(adj[n].size()==2&&!isStationLike(after.nodes[n].type),"Region Apply would create a new junction; move the region and retry");
+    std::map<std::pair<int,int>,int> original;
+    for(size_t i=0;i<before.segments.size();++i){const auto& e=before.segments[i];original[std::minmax(e.a,e.b)]=i;}
+    std::vector<int> parent(after.segments.size(),-1);
+    std::vector<std::set<std::string>> oldRoutes(before.segments.size()),newRoutes(after.segments.size());
+    for(const auto& r:before.routes)for(int e:r.segmentIndices)oldRoutes[e].insert(r.id);
+    for(const auto& r:after.routes)for(int e:r.segmentIndices)newRoutes[e].insert(r.id);
+    std::set<int> retained;
+    for(int n=0;n<count;++n)for(int first:adj[n]) {
+        if(parent[first]>=0)continue;
+        int at=n,e=first;std::vector<int> chain;
+        for(size_t guard=0;guard<=after.segments.size();++guard) {
+            chain.push_back(e);const auto& edge=after.segments[e];at=edge.a==at?edge.b:edge.a;
+            if(at<count)break;
+            e=adj[at][0]==e?adj[at][1]:adj[at][0];
+        }
+        auto it=original.find(std::minmax(n,at));
+        require(at<count&&it!=original.end(),"Region Apply would change network connectivity");
+        require(retained.insert(it->second).second,"Region Apply would duplicate a connection");
+        for(int part:chain){parent[part]=it->second;require(newRoutes[part]==oldRoutes[it->second],"Region Apply would change shared route membership");}
+    }
+    require(retained.size()==before.segments.size(),"Region Apply would remove a connection");
+    auto crosses=[](const Shape& s,const ShapeSegment& a,const ShapeSegment& b){
+        if(a.a==b.a||a.a==b.b||a.b==b.a||a.b==b.b)return false;
+        auto p=s.nodes[a.a].pos,q=s.nodes[a.b].pos,r=s.nodes[b.a].pos,t=s.nodes[b.b].pos;
+        auto cross=[](Point a,Point b,Point c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);};
+        return cross(p,q,r)*cross(p,q,t)<-1e-8&&cross(r,t,p)*cross(r,t,q)<-1e-8;
+    };
+    for(size_t i=0;i<after.segments.size();++i)for(size_t j=i+1;j<after.segments.size();++j) {
+        require(parent[i]>=0&&parent[j]>=0,"Region Apply created an isolated connection");
+        if(crosses(after,after.segments[i],after.segments[j]))
+            require(parent[i]!=parent[j]&&crosses(before,before.segments[parent[i]],before.segments[parent[j]]),"Region Apply would introduce a network crossing; move the region and retry");
+    }
+}
+void editRegions(Shape& shape,json& state,const json& req,const Camera& cam,bool apply) {
+    if(!state.contains("regionBaseline"))state["regionBaseline"]=state["shape"];
+    Shape baseline=decode(state["regionBaseline"]);
+    for(auto& n:baseline.nodes)n.pos=screen(cam,n.pos);
+    if(!apply) {
+        const auto id=identifier(req.at("featureId"));
+        auto& features=state["obstacles"]["features"];size_t index=features.size();
+        for(size_t i=0;i<features.size();++i)if(std::to_string(i)==id){index=i;break;}
+        require(index<features.size(),"Unknown region feature");
+        auto& f=features[index];require(f.value("properties",json::object()).value("featureKind","")=="region","Feature is not a region");
+        auto a=fromScreen(cam,req.at("from")),b=fromScreen(cam,req.at("to"));
+        for(auto& ring:f["geometry"]["coordinates"]){auto ps=layoutPoints(ring,state.value("planar",false));ring=json::array();for(auto p:ps)ring.push_back(layoutCoordinate({p.x+b.x-a.x,p.y+b.y-a.y},state.value("planar",false)));}
+    }
+    auto region=editableRegions(state,cam);require(!region.segIdx.empty(),"No region features to apply");
+    shape=baseline;
+    if(apply) {
+        alignNearbyRegions(region,baseline);
+        RegionDeformation::apply(shape,baseline,region);
+        alignNearbyRegions(region,shape);
+    }
+    pushOutside(shape,region);
+    if(apply) {
+        // Direction relaxation can re-enter an obstacle. Finish with the same
+        // desktop segment refinement, without another unconstrained relaxation.
+        std::vector<std::vector<Point>> polygons;buildRegionPolygons(region,polygons);
+        for(int pass=0;pass<12;++pass){
+            bool crossing=false;for(const auto& e:shape.segments)if(segmentIntersectsAnyRegionPolygonInterior(shape.nodes[e.a].pos,shape.nodes[e.b].pos,polygons)){crossing=true;break;}
+            if(!crossing)break;
+            if(!refineShapeSegmentsCrossingRegions(shape,region))break;
+            pushOutside(shape,region);
+        }
+        for(const auto& e:shape.segments)require(!segmentIntersectsAnyRegionPolygonInterior(shape.nodes[e.a].pos,shape.nodes[e.b].pos,polygons),"Region Apply could not find a clear route. Move the region slightly and retry; the current map was kept.");
+        preserveRegionTopology(baseline,shape);
+        state.erase("regionBaseline");
+    }
+    storeRegions(state,region,cam);
+    for(auto& n:shape.nodes)n.pos=cam.screenToWorld(n.pos.x,800-n.pos.y);
+}
+
 void updateRoutes(Shape& shape,json& state,const json& request) {
     const auto& changes=request.at("routes");require(changes.is_array()&&!changes.empty(),"No route changes");
     std::map<std::string,std::string> ids,names;
@@ -897,6 +1054,7 @@ json transitCoreRequest(const json& request) {
         state["obstacles"]=request.value("obstacles",map.value("transitMapObstacles",json{{"type","FeatureCollection"},{"features",json::array()}}));
     } else if(op=="loom-apply")shape=applyNativeLayout(state,request.at("map"));
     else shape=decode(state.at("shape"));
+    if(op!="move-region-feature"&&op!="apply-regions"&&op!="render-geometry"&&op!="export"&&op!="loom-export")state.erase("regionBaseline");
     auto cam=cameraFor(state);
     if(op=="loom-export")return nativeLayoutInput(shape);
     if(op=="export" || op=="loom-export") {
@@ -929,18 +1087,26 @@ json transitCoreRequest(const json& request) {
         const bool feature=op=="draw-line-feature"||op=="draw-region-feature";
         if(op=="draw-route")drawn=drawRoute(shape,request,cam);
         else if(feature)drawFeature(state,op,request,cam);
+        else if(op=="move-region-feature"||op=="apply-regions")editRegions(shape,state,request,cam,op=="apply-regions");
         else edit(shape,op,request,cam);
         identities(shape,state,&before);
-        if(op!="render-geometry" && op!="move-node" && !feature) {
+        if(op!="render-geometry" && op!="move-node" && op!="move-region-feature" && !feature) {
             state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
             if(state.contains("directionalData"))
                 state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
-            state["routeTraversals"]=editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op=="draw-route"?"split-segment":op,request);
+            state["routeTraversals"]=op=="apply-regions"?remapRouteDirections(before,shape,state.value("routeTraversals",json::array())):editRouteDirections(before,shape,state.value("routeTraversals",json::array()),op=="draw-route"?"split-segment":op,request);
             if(op=="draw-route")for(size_t i=1;i<drawn.nodes.size();++i)
                 state["routeTraversals"].push_back({{"routeId",drawn.id},{"from",shape.nodes[drawn.nodes[i-1]].uid},{"to",shape.nodes[drawn.nodes[i]].uid}});
         }
     }
     if(op=="draw-line-feature"||op=="draw-region-feature"||op=="draw-route")shape=integrateFeatures(shape,state);
+    if(op=="draw-region-feature") {
+        state["regionBaseline"]=encode(shape,cam,Shape2StyleShape(shape),state);
+        auto region=editableRegions(state,cam);
+        for(auto& n:shape.nodes)n.pos=screen(cam,n.pos);
+        pushOutside(shape,region);
+        for(auto& n:shape.nodes)n.pos=cam.screenToWorld(n.pos.x,800-n.pos.y);
+    }
     // Imported line membership is flagged using its persisted obstacle record.
     for(const auto& f:state["obstacles"].value("features",json::array())){auto props=f.value("properties",json::object());auto id=props.value("topologyRouteId",std::string());for(auto& r:shape.routes)if(r.id==id){r.isObstacle=true;r.obstacleKind=ObstacleKind::Line;}}
     if(op=="session"||op=="replace-map") {
@@ -975,10 +1141,15 @@ json transitCoreRequest(const json& request) {
         std::map<std::string,std::string> parents;for(const auto& r:renderShape.routes)parents[r.id]=logicalId(r);
         for(auto& n:renderTopology["nodes"]) {std::set<std::string> ids;for(const auto& id:n["routeIds"])ids.insert(parents.at(id));n["routeIds"]=ids;n["interchange"]=n.value("isStation",false)&&ids.size()>1;}
     }
+    // Read-only viewport rendering compensates lane offsets, not authored styles.
+    const double spacingScale=number(request,"spacingScale",1.0,0.1,5.0);
+    auto scaleSpacing=[&](StyledShape& styled) {
+        for(auto& row:styled.routes_spacing)for(auto& gap:row)gap*=spacingScale;
+    };
     auto sceneFor=[&](const json& st) {
-        if(enabled.empty()){auto styled=canonical;geometryStyle(styled,shape,st);return rendered(shape,styled,cam,topology);}
-        auto styled=renderCanonical;geometryStyle(styled,renderShape,st);
-        auto scene=rendered(renderShape,styled,cam,renderTopology);
+        if(enabled.empty()){auto styled=canonical;geometryStyle(styled,shape,st);scaleSpacing(styled);return rendered(shape,styled,cam,topology,spacingScale);}
+        auto styled=renderCanonical;geometryStyle(styled,renderShape,st);scaleSpacing(styled);
+        auto scene=rendered(renderShape,styled,cam,renderTopology,spacingScale);
         scene["displayNodes"]=json::array();
         for(const auto& n:renderTopology["nodes"])if(!n["routeIds"].empty())scene["displayNodes"].push_back(n);
         auto plain=renderCanonical;geometryStyle(plain,renderShape,json::object());

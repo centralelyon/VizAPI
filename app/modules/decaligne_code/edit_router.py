@@ -31,7 +31,8 @@ OPERATIONS = (
     "session", "evaluation", "upload", "move-node", "delete-node", "add-station", "merge-stations",
     "split-station", "split-segment", "add-route", "delete-route", "update-routes",
     "draw-route", "draw-line-feature", "draw-region-feature",
-    "render-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"
+    "move-region-feature", "apply-regions", "move-background-image",
+    "render-geometry", "viewport-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"
 )
 
 for operation in OPERATIONS:

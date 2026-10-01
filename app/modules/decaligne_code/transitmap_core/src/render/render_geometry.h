@@ -18,5 +18,5 @@ struct StyledShapeDisplayData {
 
 // Computes exactly the same spacing- and bend-adjusted geometry used by drawStyledShape.
 StyledShapeDisplayData buildStyledShapeDisplayData(
-    const StyledShape& styledShape, const Camera& camera);
+    const StyledShape& styledShape, const Camera& camera, double symbolScale=1.0);
 

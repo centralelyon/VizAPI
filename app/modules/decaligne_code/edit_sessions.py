@@ -7,6 +7,7 @@ leave the persisted Shape, style, and revision unchanged.
 from contextlib import contextmanager
 import json
 import logging
+import math
 import os
 logger = logging.getLogger(__name__)
 from pathlib import Path
@@ -48,6 +49,21 @@ def core_call(payload):
     return data
 
 
+def geographic_map(source, state):
+    """OSM tile transform in the same screen coordinates as the editable Shape."""
+    if source.get("inputType") == "trajectory" or source.get("coordinateSystem") == "planar" or state.get("planar"):
+        return None
+    transform = state.get("transform", {})
+    x, y, camera_scale = (transform.get(k) for k in ("x", "y", "scale"))
+    if any(type(v) not in (int, float) or not math.isfinite(v) for v in (x, y, camera_scale)) or camera_scale <= 0:
+        return None
+    # C++ uses Web Mercator metres, screen centre (600,400), and Y down.
+    circumference = 2 * math.pi * 6378137
+    scale = circumference * camera_scale
+    return {"origin": [0.5 + x / circumference - 600 / scale,
+                       0.5 - y / circumference - 400 / scale], "scale": scale}
+
+
 class EditSessions:
     def __init__(self, database=None, core=core_call, loom=run_octi):
         self.database = database
@@ -87,7 +103,10 @@ class EditSessions:
 
     @staticmethod
     def public(result, session_id, revision):
-        return {**{k: v for k, v in result.items() if k != "state"}, "sessionId": session_id, "revision": revision}
+        response = {**{k: v for k, v in result.items() if k != "state"}, "sessionId": session_id, "revision": revision}
+        if "shape" in result:
+            response["geographicMap"] = geographic_map(result.get("state", {}).get("original", {}), result.get("state", {}))
+        return response
 
     def create(self, body):
         if not isinstance(body.get("map"), dict):
@@ -351,6 +370,23 @@ class EditSessions:
             return result
 
     def _apply(self, operation, body):
+        if operation == "move-background-image":
+            sid, revision, _ = self.read(body)
+            values = [body.get(k) for k in ("x", "y", "fromX", "fromY", "toX", "toY")]
+            if any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 1e7 for v in values):
+                raise HTTPException(422, "Invalid image drag coordinates")
+            x, y, ax, ay, bx, by = values
+            return {"sessionId": sid, "revision": revision, "position": [x + bx - ax, y + by - ay]}
+        if operation == "viewport-geometry":
+            scale = body.get("spacingScale")
+            if type(scale) not in (int, float) or not math.isfinite(scale) or not 0.1 <= scale <= 5:
+                raise HTTPException(422, "spacingScale must be between 0.1 and 5")
+            sid, revision, state = self.read(body)
+            result = self.core({"op": "render-geometry", "state": state, "spacingScale": scale})
+            # Do not persist result.state, create checkpoints, or advance revision.
+            # The stored map and style stay authoritative for edits and export.
+            return {"sessionId": sid, "revision": revision, "spacingScale": scale,
+                    "renderGeometries": result["renderGeometries"]}
         if operation == "upload":
             sid, revision, state = self.read(body)
 
@@ -530,7 +566,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":

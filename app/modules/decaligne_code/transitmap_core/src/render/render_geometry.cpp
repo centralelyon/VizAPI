@@ -445,7 +445,7 @@ namespace {
 }
 
 StyledShapeDisplayData buildStyledShapeDisplayData(
-    const StyledShape& styledShape, const Camera& camera) {
+    const StyledShape& styledShape, const Camera& camera, double symbolScale) {
     StyledShapeDisplayData result;
     const auto canonicalScreenGeometry = buildCanonicalScreenGeometry(styledShape, camera);
     const auto spacingAdjustedGeometry =
@@ -468,7 +468,7 @@ StyledShapeDisplayData buildStyledShapeDisplayData(
     result.normalStations = updateNormalStations(styledShape, result.worldRoutePaths);
     result.transferStations = updateTransferStations(
         styledShape, result.worldRoutePaths,
-        kStationMergeEpsilonPixels / std::max(camera.getScale(), kStyledEps));
+        kStationMergeEpsilonPixels * symbolScale / std::max(camera.getScale(), kStyledEps));
     return result;
 }
 
