@@ -566,7 +566,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":

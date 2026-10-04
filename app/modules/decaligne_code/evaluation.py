@@ -20,7 +20,7 @@ UI_ACTIONS = {'session-start', 'style-change', 'style-select', 'mode-change',
               'edit-mode', 'side-change', 'snap-change', 'undo', 'redo'}
 OPERATIONS = {'move-node', 'delete-node', 'merge-stations', 'split-station',
               'split-segment', 'add-station', 'add-route', 'update-routes', 'delete-route',
-              'restore', 'loom', 'upload', 'draw-route', 'draw-line-feature', 'draw-region-feature', 'move-region-feature', 'apply-regions'}
+              'restore', 'loom', 'upload', 'draw-route', 'draw-line-feature', 'draw-region-feature', 'move-region-feature', 'scale-region-feature', 'reshape-region-feature', 'delete-region-feature', 'apply-regions'}
 
 
 def validate_id(value):
@@ -283,14 +283,14 @@ def operation_event(operation, body, before, result, elapsed, failed=False):
     before_nodes = {n['id']: n for n in before.get('shape', {}).get('nodes', [])}
     after_nodes = {n['id']: n for n in (result or {}).get('shape', {}).get('nodes', [])}
     if operation.startswith('draw-'):
-        event.update(points=body.get('points'), coordinateSystem='canvas', snap=body.get('snap', False),
+        event.update(points=body.get('points'), preset=body.get('preset'), center=body.get('center'), coordinateSystem='canvas', snap=body.get('snap', False),
                      color=body.get('color'))
         if result:
             old_routes = {r['id'] for r in before.get('shape', {}).get('routes', [])}
             event['addedRouteIds'] = [r['id'] for r in result.get('shape', {}).get('routes', []) if r['id'] not in old_routes]
             event['addedNodeIds'] = sorted(after_nodes.keys() - before_nodes.keys())
-    if operation == 'move-region-feature':
-        event.update({'from': body.get('from'), 'to': body.get('to'), 'coordinateSystem': 'canvas'})
+    if operation in ('move-region-feature', 'scale-region-feature', 'reshape-region-feature', 'delete-region-feature'):
+        event.update({'from': body.get('from'), 'to': body.get('to'), 'wheelDelta': body.get('wheelDelta'), 'wheelEvents': body.get('wheelEvents'), 'edgeIndex': body.get('edgeIndex'), 'vertexIndex': body.get('vertexIndex'), 'coordinateSystem': 'canvas'})
     if operation == 'apply-regions':
         event['durationMs'] = round(elapsed * 1000, 3)
     if operation == 'move-node':
