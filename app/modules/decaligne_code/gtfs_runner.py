@@ -306,6 +306,28 @@ def list_gtfs_routes(path):
                         }
                     )
 
+                stops = {row["stop_id"]: row.get("stop_name", row["stop_id"]) for row in _read_csv_from_zip(archive, "stops.txt")}
+                trips = _read_csv_from_zip(archive, "trips.txt")
+                first_trip = {}
+                for trip in sorted(trips, key=lambda row: (row.get("direction_id", ""), row["trip_id"])):
+                    first_trip.setdefault(trip["route_id"], trip["trip_id"])
+                route_by_trip = {trip: route for route, trip in first_trip.items()}
+                termini = {}
+                for stop in _read_csv_from_zip(archive, "stop_times.txt"):
+                    route = route_by_trip.get(stop["trip_id"])
+                    if route is None:
+                        continue
+                    item = (int(stop["stop_sequence"]), stops.get(stop["stop_id"], stop["stop_id"]))
+                    if route not in termini:
+                        termini[route] = [item, item]
+                    else:
+                        termini[route] = [min(termini[route][0], item), max(termini[route][1], item)]
+                for route in routes:
+                    if route["route_id"] in termini:
+                        first, last = termini[route["route_id"]]
+                        route.update(start=first[1], end=last[1])
+                    if route["route_color"]:
+                        route["color"] = "#" + route["route_color"].lstrip("#")
                 return {"routes": routes}
 
     except zipfile.BadZipFile as exc:
@@ -322,6 +344,27 @@ def run_gtfs(path, selected_route_ids=None):
         )
     finally:
         GTFS_SLOT.release()
+
+def _canonicalize_stations(graph, stops):
+    # Platform IDs can differ across route imports; parent_station is shared.
+    parents = {row["stop_id"]: row.get("parent_station", "") for row in stops}
+
+    def station_id(stop_id):
+        seen = set()
+        while parents.get(stop_id) and stop_id not in seen:
+            seen.add(stop_id)
+            stop_id = parents[stop_id]
+        return stop_id
+
+    for feature in graph["features"]:
+        props = feature.get("properties") or {}
+        if props.get("station_id"):
+            props["station_id"] = station_id(props["station_id"])
+    for route in graph["transitMapDirections"]["routes"]:
+        for pattern in route["patterns"]:
+            for stop in pattern["orderedStops"]:
+                stop["stopId"] = station_id(stop["stopId"])
+
 
 def _run_gtfs(path, selected_route_ids=None):
 
@@ -509,4 +552,6 @@ def _run_gtfs(path, selected_route_ids=None):
                     raise RuntimeError("GTFS converter did not preserve the route identity token")
                 name = original.get("route_short_name") or original.get("route_long_name") or original["route_id"]
                 line.update(id=original["route_id"], name=name, label=name)
+        with zipfile.ZipFile(path) as archive:
+            _canonicalize_stations(graph, _read_csv_from_zip(archive, "stops.txt"))
         return graph

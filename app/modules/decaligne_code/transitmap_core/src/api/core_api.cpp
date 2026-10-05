@@ -140,7 +140,27 @@ json encode(const Shape& s, const Camera& camera, const StyledShape& styled, jso
             if(!registry.contains(key)) { long long counter=state.at("nextId"); registry[key]="p"+std::to_string(counter); state["nextId"]=counter+1; }
             paths.push_back({{"id",registry[key]},{"nodeIds",ns},{"segmentIds",es}});
         }
-        routes.push_back({{"id",r.id},{"name",r.name},{"color",color(r.color)},{"rgb",json::array({r.color[0],r.color[1],r.color[2]})},
+        std::map<int,int> degree;
+        for(int e:r.segmentIndices){++degree[s.segments[e].a];++degree[s.segments[e].b];}
+        json endpoints=json::array();
+        auto endpoint=[&](int index){const auto& n=s.nodes[index];return n.name.empty()?n.station_id:n.name;};
+        for(const auto& entry:degree)if(entry.second==1)endpoints.push_back(endpoint(entry.first));
+        if(endpoints.empty()&&!styled.route_path_topology[ri].empty()) {
+            const auto& ns=styled.route_path_topology[ri].front().nodes;
+            if(!ns.empty()){endpoints.push_back(endpoint(ns.front()));endpoints.push_back(endpoint(ns.back()));}
+        }
+        // Ordered trajectory visits retain direction through loops and repeated edges.
+        if(state.contains("routeTraversals")) {
+            json visits=json::array();for(const auto& visit:state["routeTraversals"])if(visit["routeId"]==r.id)visits.push_back(visit);
+            if(!visits.empty()&&std::all_of(visits.begin(),visits.end(),[](const auto& v){return v.contains("traversalIndex");})) {
+                std::stable_sort(visits.begin(),visits.end(),[](const auto& a,const auto& b){return a["traversalIndex"]<b["traversalIndex"];});
+                auto first=visits.front()["from"],last=visits.back()["to"];
+                auto start=std::find_if(s.nodes.begin(),s.nodes.end(),[&](const auto& n){return n.uid==first;});
+                auto end=std::find_if(s.nodes.begin(),s.nodes.end(),[&](const auto& n){return n.uid==last;});
+                if(start!=s.nodes.end()&&end!=s.nodes.end())endpoints=json::array({endpoint(int(start-s.nodes.begin())),endpoint(int(end-s.nodes.begin()))});
+            }
+        }
+        routes.push_back({{"endpoints",endpoints},{"id",r.id},{"name",r.name},{"color",color(r.color)},{"rgb",json::array({r.color[0],r.color[1],r.color[2]})},
             {"width",r.route_width},{"isObstacle",r.isObstacle},{"obstacleKind",int(r.obstacleKind)},{"segmentIds",ids},{"paths",paths}});
     }
     state["pathIds"]=registry;
@@ -287,7 +307,9 @@ Shape loadMap(json map) {
     for(const auto& f:map["features"])if(f["geometry"]["type"]=="LineString") {
         const auto& p=f["properties"];require(points.count(p.at("from"))&&points.count(p.at("to")),"LineString references a missing point");
     }
-    if(hasRouteDirections(map))return loadDirectedTopology(map);
+    // GTFS topo already defines connectivity with from/to. Re-snapping its
+    // samples to nearby stations can create links absent from that topology.
+    if(hasRouteDirections(map)||map.contains("transitMapDirections"))return loadDirectedTopology(map);
     auto loaderMap=map;
     std::set<std::string> anchors,stationPositions;
     if(map.contains("transitMapDirections")) {
@@ -1001,7 +1023,7 @@ void updateRoutes(Shape& shape,json& state,const json& request) {
         if(value.is_array()){for(auto& x:value)self(self,x);return;}if(!value.is_object())return;
         for(auto it=value.begin();it!=value.end();++it){
             if((it.key()=="routeId"||it.key()=="logicalRouteId"||it.key()=="topologyRouteId")&&it.value().is_string()&&ids.count(it.value().get<std::string>()))it.value()=ids.at(it.value().get<std::string>());
-            else if((it.key()=="routeIds"||it.key()=="bidirectionalRoutes")&&it.value().is_array()){for(auto& id:it.value())if(id.is_string()&&ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());}
+            else if((it.key()=="routeIds"||it.key()=="visibleRouteIds"||it.key()=="bidirectionalRoutes")&&it.value().is_array()){for(auto& id:it.value())if(id.is_string()&&ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());}
             else self(self,it.value());
         }
     };
@@ -1015,7 +1037,13 @@ void updateRoutes(Shape& shape,json& state,const json& request) {
 void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     if(op=="move-node") {
         int n=nodeIndex(s,req.at("nodeId")); Point proposed=fromScreen(cam,req);
-        s.nodes[n].pos=req.value("snap",true)?snapShapeStationPosition(s,n,proposed,pi):proposed;
+        if(req.value("orthogonal",false)) {
+            const auto origin=s.nodes[n].pos;
+            const auto axis=req.value("axis",std::string());
+            if(axis=="x"||(axis!="y"&&std::abs(proposed.x-origin.x)>=std::abs(proposed.y-origin.y)))proposed.y=origin.y;
+            else proposed.x=origin.x;
+            s.nodes[n].pos=proposed;
+        } else s.nodes[n].pos=req.value("snap",true)?snapShapeStationPosition(s,n,proposed,pi):proposed;
     } else if(op=="delete-node") {
         require(deleteShapeNodes(s,{nodeIndex(s,req.at("nodeId"))}),"Delete failed");
     } else if(op=="merge-stations") {
@@ -1127,8 +1155,48 @@ json transitCoreRequest(const json& request) {
         }
         graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
+    if(op=="append-map") {
+        auto incoming=loadMap(request.at("map"));
+        std::map<std::string,int> nodes;
+        auto stationKey=[](const ShapeNode& n){return !n.station_id.empty()?n.station_id:isStationLike(n.type)?n.uid:std::string();};
+        for(size_t i=0;i<shape.nodes.size();++i){auto key=stationKey(shape.nodes[i]);if(!key.empty())nodes[key]=int(i);}
+        std::vector<int> remap;
+        for(auto n:incoming.nodes) {
+            // Generated shape-point IDs belong to one conversion, not the feed.
+            // Only a real station ID may join independently imported routes.
+            const auto key=stationKey(n);
+            auto found=key.empty()?nodes.end():nodes.find(key);
+            if(found!=nodes.end())remap.push_back(found->second);
+            else {int index=int(shape.nodes.size());if(!key.empty())nodes[key]=index;remap.push_back(index);n.id=-1;shape.nodes.push_back(n);}
+        }
+        std::map<std::pair<int,int>,int> edges;
+        for(size_t i=0;i<shape.segments.size();++i){const auto& e=shape.segments[i];edges[std::minmax(e.a,e.b)]=int(i);}
+        std::vector<int> edgeMap;
+        for(auto e:incoming.segments){e.a=remap[e.a];e.b=remap[e.b];auto key=std::minmax(e.a,e.b);auto found=edges.find(key);
+            if(found!=edges.end())edgeMap.push_back(found->second);
+            else {int index=int(shape.segments.size());edges[key]=index;edgeMap.push_back(index);e.uid="";shape.segments.push_back(e);}}
+        for(auto r:incoming.routes)if(std::none_of(shape.routes.begin(),shape.routes.end(),[&](const auto& old){return old.id==r.id;})) {
+            for(int& e:r.segmentIndices)e=edgeMap[e];shape.routes.push_back(r);
+        }
+        identities(shape,state);state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
+        const auto& map=request.at("map");
+        if(map.contains("transitMapDirections")) {
+            if(!state.contains("directionalData"))state["directionalData"]=map["transitMapDirections"];
+            else for(const auto& r:map["transitMapDirections"]["routes"]) {
+                auto& routes=state["directionalData"]["routes"];
+                if(std::none_of(routes.begin(),routes.end(),[&](const auto& old){return old["routeId"]==r["routeId"];}))routes.push_back(r);
+            }
+            state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
+        }
+        if(hasRouteDirections(map)) {
+            auto records=importRouteDirections(incoming,map);
+            std::map<std::string,std::string> nodeIds;
+            for(size_t i=0;i<incoming.nodes.size();++i)nodeIds[incoming.nodes[i].uid]=shape.nodes[remap[i]].uid;
+            for(auto record:records){record["from"]=nodeIds.at(record["from"]);record["to"]=nodeIds.at(record["to"]);state["routeTraversals"].push_back(record);}
+        }
+    }
     if(op=="update-routes"){state["styles"]=request.value("styles",state.value("styles",json::object()));updateRoutes(shape,state,request);}
-    if(op!="session" && op!="replace-map" && op!="loom-apply" && op!="update-routes") {
+    if(op!="session" && op!="replace-map" && op!="loom-apply" && op!="append-map" && op!="update-routes") {
         Shape before=shape;DrawnRoute drawn;
         const bool feature=op=="draw-line-feature"||op=="draw-region-feature";
         if(op=="draw-route")drawn=drawRoute(shape,request,cam);
@@ -1193,13 +1261,26 @@ json transitCoreRequest(const json& request) {
         for(auto& row:styled.routes_spacing)for(auto& gap:row)gap*=spacingScale;
     };
     auto sceneFor=[&](const json& st) {
-        if(enabled.empty()){auto styled=canonical;geometryStyle(styled,shape,st);scaleSpacing(styled);return rendered(shape,styled,cam,topology,spacingScale);}
-        auto styled=renderCanonical;geometryStyle(styled,renderShape,st);scaleSpacing(styled);
-        auto scene=rendered(renderShape,styled,cam,renderTopology,spacingScale);
-        scene["displayNodes"]=json::array();
-        for(const auto& n:renderTopology["nodes"])if(!n["routeIds"].empty())scene["displayNodes"].push_back(n);
-        auto plain=renderCanonical;geometryStyle(plain,renderShape,json::object());
-        scene["geometryRoutes"]=rendered(renderShape,plain,cam,renderTopology)["routes"];
+        Shape visible=enabled.empty()?shape:renderShape;
+        if(st.contains("visibleRouteIds")) {
+            std::set<std::string> ids=st.at("visibleRouteIds").get<std::set<std::string>>();
+            visible.routes.erase(std::remove_if(visible.routes.begin(),visible.routes.end(),[&](const auto& r){return !r.isObstacle&&!ids.count(logicalId(r));}),visible.routes.end());
+        }
+        auto plain=Shape2StyleShape(visible);
+        if(!enabled.empty())directionalSharedGeometry(visible,plain);
+        auto temporary=state;auto visibleTopology=encode(visible,cam,plain,temporary);
+        std::map<std::string,std::string> parents;for(const auto& r:visible.routes)parents[r.id]=logicalId(r);
+        for(auto& n:visibleTopology["nodes"]){std::set<std::string> ids;for(const auto& id:n["routeIds"])ids.insert(parents.at(id));n["routeIds"]=ids;n["interchange"]=n.value("isStation",false)&&ids.size()>1;}
+        auto styled=plain;geometryStyle(styled,visible,st);scaleSpacing(styled);
+        auto scene=rendered(visible,styled,cam,visibleTopology,spacingScale);
+        scene["displayNodes"]=json::array();scene["displaySegmentIds"]=json::array();scene["editNodeIds"]=json::array();
+        for(const auto& n:visibleTopology["nodes"])if(!n["routeIds"].empty())scene["displayNodes"].push_back(n);
+        std::set<std::string> logicalRoutes;for(const auto& r:visible.routes)logicalRoutes.insert(logicalId(r));
+        auto shown=[&](const json& item){return std::any_of(item["routeIds"].begin(),item["routeIds"].end(),[&](const auto& id){return logicalRoutes.count(id.template get<std::string>());});};
+        for(const auto& e:topology["segments"])if(shown(e))scene["displaySegmentIds"].push_back(e["id"]);
+        for(const auto& n:topology["nodes"])if(shown(n))scene["editNodeIds"].push_back(n["id"]);
+        geometryStyle(plain,visible,json::object());
+        scene["geometryRoutes"]=rendered(visible,plain,cam,visibleTopology)["routes"];
         return scene;
     };
     for(auto it=styles.begin();it!=styles.end();++it) {

@@ -20,6 +20,17 @@ Point coordinate(const json& c, bool planar) {
     return !planar&&std::abs(p.x)<=180&&std::abs(p.y)<=90 ? lonlatToWebMerc(p.x,p.y) : p;
 }
 double distance(Point a,Point b){return std::hypot(a.x-b.x,a.y-b.y);}
+// Consecutive duplicate samples are not topology nodes. Use the same cleaned
+// samples for loading and traversal offsets so direction records stay aligned.
+std::vector<Point> interiorSamples(const json& coords,Point start,Point end,bool planar) {
+    std::vector<Point> samples;
+    for(size_t i=1;i+1<coords.size();++i) {
+        auto p=coordinate(coords[i],planar);
+        if(distance(samples.empty()?start:samples.back(),p)>1e-9)samples.push_back(p);
+    }
+    while(!samples.empty()&&distance(samples.back(),end)<=1e-9)samples.pop_back();
+    return samples;
+}
 struct Graph {
     const Shape& shape;
     std::map<std::string,int> nodes;
@@ -111,7 +122,7 @@ Shape loadDirectedTopology(const json& map) {
         const auto& p=f.at("properties");const auto& coords=f["geometry"]["coordinates"];
         int a=nodes.at(id(p.at("from"))),b=nodes.at(id(p.at("to")));
         std::vector<int> chain{a};
-        for(size_t i=1;i+1<coords.size();++i){ShapeNode n;n.id=int(s.nodes.size());n.pos=coordinate(coords[i],planar);
+        for(auto pos:interiorSamples(coords,s.nodes[a].pos,s.nodes[b].pos,planar)){ShapeNode n;n.id=int(s.nodes.size());n.pos=pos;
             do{n.uid="direction-point-"+std::to_string(serial++);}while(reserved.count(n.uid));
             reserved.insert(n.uid);chain.push_back(n.id);s.nodes.push_back(n);}
         chain.push_back(b);std::vector<int> edges;
@@ -139,11 +150,11 @@ json importRouteDirections(const Shape& s,const json& map) {
     Graph g(s);json records=json::array();size_t edgeOffset=0;
     for(const auto& f:map.at("features"))if(f["geometry"]["type"]=="LineString") {
         const auto& p=f.at("properties");auto a=id(p.at("from")),b=id(p.at("to"));
-        // loadDirectedTopology keeps feature order, including every interior
-        // sample. Follow this specific segment, never a shorter parallel path.
+        // Follow the same cleaned samples as loadDirectedTopology, in feature order.
         std::vector<int> chain{g.nodes.at(a)};
-        for(size_t i=1;i<f["geometry"]["coordinates"].size();++i) {
-            if(f["geometry"]["coordinates"].size()==2&&a==b)continue;
+        const auto samples=interiorSamples(f["geometry"]["coordinates"],s.nodes[g.nodes.at(a)].pos,s.nodes[g.nodes.at(b)].pos,map.value("coordinateSystem","")=="planar");
+        for(size_t i=0;i<samples.size()+1;++i) {
+            if(samples.empty()&&a==b)continue;
             const auto& edge=s.segments.at(edgeOffset++);chain.push_back(edge.b);
         }
         for(const auto& line:p.at("lines")) {

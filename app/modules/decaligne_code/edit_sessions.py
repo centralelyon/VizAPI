@@ -566,7 +566,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":
@@ -585,6 +585,28 @@ class EditSessions:
             # Export is a snapshot at the requested revision, not a mutation.
             return self.public(result, sid, revision)
         result["state"]["original"] = state["original"]
+        if operation == "append-map":
+            # Keep Original network complete as more catalog routes are loaded.
+            original = result["state"]["original"]
+            points = {f["properties"]["id"] for f in original["features"] if f["geometry"]["type"] == "Point"}
+            edges = {tuple(sorted((f["properties"]["from"], f["properties"]["to"]))): f for f in original["features"] if f["geometry"]["type"] == "LineString"}
+            for feature in body["map"]["features"]:
+                props = feature["properties"]
+                if feature["geometry"]["type"] == "Point":
+                    if props["id"] not in points:
+                        original["features"].append(feature)
+                        points.add(props["id"])
+                else:
+                    key = tuple(sorted((props["from"], props["to"])))
+                    if key in edges:
+                        ids = {line["id"] for line in edges[key]["properties"]["lines"]}
+                        edges[key]["properties"]["lines"].extend(line for line in props["lines"] if line["id"] not in ids)
+                    else:
+                        props["id"] = "input:" + uuid.uuid4().hex
+                        edges[key] = feature
+                        original["features"].append(feature)
+            if "transitMapDirections" in body["map"]:
+                original["transitMapDirections"] = result["state"]["directionalData"]
 
         new_revision = revision + 1
         now = time.time()

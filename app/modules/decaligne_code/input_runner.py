@@ -25,14 +25,16 @@ def inspect_input(files):
                     result = list_gtfs_routes(path)
                     return {"type": "gtfs", "routes": result.get("routes", [])}
             return list_trajectory_routes(csv_files_from_zip(data))
-    if all(name.lower().endswith(".csv") for name, _ in files):
+    if all(name.lower().endswith((".csv", ".jsonl")) for name, _ in files):
         return list_trajectory_routes(files)
-    if len(files) == 1 and files[0][0].lower().endswith(".csv"):
+    if len(files) == 1 and files[0][0].lower().endswith((".csv", ".jsonl")):
         return list_trajectory_routes(files)
-    raise ValueError("Choose JSON/GeoJSON, one GTFS/CSV ZIP, or one or more trajectory CSV files")
+    raise ValueError("Choose JSON/GeoJSON, one GTFS/trajectory ZIP, or trajectory CSV/JSONL files")
 
 
 def convert_input(files, route_ids=None):
+    if route_ids and len(route_ids) > 500:
+        raise ValueError("The existing edit engine supports at most 500 loaded routes. Select a smaller subset in the legend.")
     info = inspect_input(files)
     kind = info["type"]
     if kind == "json":

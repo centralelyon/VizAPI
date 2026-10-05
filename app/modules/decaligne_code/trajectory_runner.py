@@ -1,4 +1,6 @@
 import csv
+import json
+import math
 import io
 import zipfile
 from collections import OrderedDict
@@ -79,13 +81,13 @@ def csv_files_from_zip(data: bytes):
             name
             for name in archive.namelist()
             if not name.endswith("/")
-            and name.lower().endswith(".csv")
+            and name.lower().endswith((".csv", ".jsonl"))
         ]
 
         if not names:
             raise ValueError(
                 "ZIP is neither a GTFS feed "
-                "nor a CSV trajectory archive"
+                "nor a CSV/JSONL trajectory archive"
             )
 
         return [
@@ -228,31 +230,41 @@ def _route_from_file(
     }
 
 
+def _jsonl_routes(filename, data):
+    routes = []
+    for line_number, line in enumerate(data.decode("utf-8-sig").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            route_id = str(row["uuid"])
+            points = []
+            for pair in row["raw_xy"]:
+                point = (float(pair[0]), float(pair[1]))
+                if not all(math.isfinite(v) for v in point):
+                    raise ValueError("non-finite coordinate")
+                if not points or points[-1] != point:
+                    points.append(point)
+            if len(points) < 2 or not route_id:
+                raise ValueError("route needs an ID and two distinct consecutive positions")
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            raise ValueError(f"{filename}:{line_number}: invalid uuid/raw_xy trajectory: {exc}") from exc
+        routes.append({"route_id": route_id, "filename": filename, "points": points})
+    if not routes:
+        raise ValueError(f"{filename}: no trajectories")
+    return routes
+
+
 def parse_routes(files):
-
-    routes = [
-        _route_from_file(
-            name,
-            data,
-        )
-        for name, data in files
-    ]
-
+    routes = []
+    for name, data in files:
+        routes.extend(_jsonl_routes(name, data) if name.lower().endswith(".jsonl") else [_route_from_file(name, data)])
     seen = set()
-
-    for route in routes:
-
-        route_id = route["route_id"]
-
-        if route_id in seen:
-            raise ValueError(
-                "Duplicate route_id/"
-                "participant_id across "
-                f"CSV files: {route_id}"
-            )
-
-        seen.add(route_id)
-
+    for index, route in enumerate(routes):
+        if route["route_id"] in seen:
+            raise ValueError(f"Duplicate route ID: {route['route_id']}")
+        seen.add(route["route_id"])
+        route["color"] = _route_color(index)
     return routes
 
 
@@ -271,8 +283,10 @@ def list_trajectory_routes(files):
                 "route_name":
                     route["route_id"],
 
-                "filename":
-                    route["filename"],
+                "filename": route["filename"],
+                "color": "#" + route["color"],
+                "start": str(route["points"][0]),
+                "end": str(route["points"][-1]),
             }
             for route in routes
         ],
@@ -314,10 +328,6 @@ def build_trajectory_network(
             "No selected CSV routes remain"
         )
 
-    for index, route in enumerate(routes):
-        route["color"] = _route_color(
-            index
-        )
 
     node_ids = OrderedDict()
 
@@ -327,7 +337,7 @@ def build_trajectory_network(
 
             if point not in node_ids:
                 node_ids[point] = (
-                    f"n{len(node_ids)}"
+                    f"xy:{point[0]:g}:{point[1]:g}"
                 )
 
     routes_at_point = {
@@ -376,8 +386,7 @@ def build_trajectory_network(
                     "station_id":
                         node_id,
 
-                    "station_label":
-                        node_id,
+                    "station_label": f"({point[0]:g}, {point[1]:g})",
 
                     "interchange":
                         is_interchange,
@@ -403,10 +412,7 @@ def build_trajectory_network(
 
         points = route["points"]
 
-        for a, b in zip(
-            points,
-            points[1:],
-        ):
+        for traversal_index, (a, b) in enumerate(zip(points, points[1:])):
 
             if a == b:
                 continue
@@ -436,20 +442,7 @@ def build_trajectory_network(
 
             segment = segments[key]
 
-            #
-            # Add this route membership once.
-            #
-            if not any(
-                existing["id"]
-                == route_id
-                for existing
-                in segment["lines"]
-            ):
-                segment[
-                    "lines"
-                ].append(
-                    dict(line)
-                )
+            segment["lines"].append({**line, "from": from_id, "to": to_id, "traversalIndex": traversal_index})
 
     for index, segment in enumerate(
         segments.values()

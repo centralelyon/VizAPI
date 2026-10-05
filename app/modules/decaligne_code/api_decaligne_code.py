@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tempfile
 
@@ -154,10 +155,16 @@ async def input_routes(files: list[UploadFile] = File(...)):
 
 
 @module.router.post("/input")
-async def input_convert(files: list[UploadFile] = File(...), route_id: list[str] = Query(default=[])):
+async def input_convert(files: list[UploadFile] = File(...), route_id: list[str] = Query(default=[]), route_names: str = Query(default="{}")):
     try:
         payload = await _uploaded_files(files)
-        return await run_in_threadpool(convert_input, payload, route_id)
+        result = await run_in_threadpool(convert_input, payload, route_id)
+        names = json.loads(route_names)
+        for feature in result["features"]:
+            for line in feature.get("properties", {}).get("lines", []):
+                if str(line.get("id")) in names:
+                    line["name"] = line["label"] = names[str(line["id"])]
+        return result
     except GtfsBusyError as exc:
         raise HTTPException(429, str(exc)) from exc
     except ValueError as exc:

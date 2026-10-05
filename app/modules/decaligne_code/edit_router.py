@@ -29,7 +29,7 @@ def endpoint(operation):
 
 OPERATIONS = (
     "session", "evaluation", "upload", "move-node", "delete-node", "add-station", "merge-stations",
-    "split-station", "split-segment", "add-route", "delete-route", "update-routes",
+    "split-station", "split-segment", "add-route", "append-map", "delete-route", "update-routes",
     "draw-route", "draw-line-feature", "draw-region-feature",
     "move-region-feature", "scale-region-feature", "reshape-region-feature", "delete-region-feature", "apply-regions", "move-background-image",
     "render-geometry", "viewport-geometry", "snapshot", "checkout", "loom", "export", "restore", "close"
@@ -50,3 +50,17 @@ async def edit():
         "description": "Transit network editing API",
         "operations": list(OPERATIONS),
     }
+
+
+@router.post("/edit/node-drag-preview", include_in_schema=False)
+async def node_drag_preview(request: Request):
+    body = await request.json()
+    x, y = body["point"]
+    ox, oy = body["origin"]
+    if abs(x - ox) >= abs(y - oy):
+        y = oy
+        axis = "x"
+    else:
+        x = ox
+        axis = "y"
+    return {"point": [x, y], "axis": axis}
