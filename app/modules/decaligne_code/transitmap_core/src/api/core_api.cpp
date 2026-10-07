@@ -167,7 +167,7 @@ json encode(const Shape& s, const Camera& camera, const StyledShape& styled, jso
     return {{"nodes",nodes},{"segments",edges},{"routes",routes}};
 }
 void validate(const Shape& s) {
-    require(s.nodes.size()<=50000 && s.segments.size()<=100000 && s.routes.size()<=500,"Network exceeds edit limits");
+
     for(const auto& n:s.nodes) require(std::isfinite(n.pos.x)&&std::isfinite(n.pos.y),"Non-finite node");
     for(const auto& e:s.segments) require(e.a>=0&&e.b>=0&&e.a<int(s.nodes.size())&&e.b<int(s.nodes.size())&&e.a!=e.b,"Invalid topology segment");
     std::set<std::string> ids;
