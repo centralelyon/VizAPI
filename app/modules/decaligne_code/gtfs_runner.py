@@ -299,6 +299,7 @@ def list_gtfs_routes(path):
                         {
                             "route_id": row.get("route_id", ""),
                             "route_short_name": row.get("route_short_name", ""),
+                            "route_name": row.get("route_short_name") or row.get("route_long_name") or row.get("route_id", ""),
                             "route_long_name": row.get("route_long_name", ""),
                             "route_type": row.get("route_type", ""),
                             "route_color": row.get("route_color", ""),

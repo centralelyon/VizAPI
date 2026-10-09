@@ -1260,6 +1260,25 @@ json transitCoreRequest(const json& request) {
     auto scaleSpacing=[&](StyledShape& styled) {
         for(auto& row:styled.routes_spacing)for(auto& gap:row)gap*=spacingScale;
     };
+    std::map<std::string,json> originalPositions,originalStations,originalRoutes;
+    for(const auto& f:state.value("original",json::object()).value("features",json::array())) {
+        const auto& props=f.at("properties");
+        auto geometry=mapCoordinates(f.at("geometry"),&cam,state.value("planar",false));
+        if(geometry.at("type")=="Point") {
+            const auto id=identifier(props.at("id"));
+            originalPositions[id]=geometry["coordinates"];
+            const auto stationId=props.contains("station_id")&&props["station_id"].is_string()?props["station_id"].get<std::string>():id;
+            if(!stationId.empty())originalStations[stationId]=geometry["coordinates"];
+        } else if(geometry.at("type")=="LineString") {
+            json commands=json::array();
+            for(const auto& p:geometry["coordinates"])commands.push_back({{"type",commands.empty()?"move":"line"},{"x",p[0]},{"y",p[1]}});
+            for(const auto& line:props.at("lines")) {
+                const auto id=identifier(line.contains("id")?line["id"]:line["label"]);
+                if(!originalRoutes.count(id))originalRoutes[id]=json::array();
+                originalRoutes[id].push_back({{"commands",commands}});
+            }
+        }
+    }
     auto sceneFor=[&](const json& st) {
         Shape visible=enabled.empty()?shape:renderShape;
         if(st.contains("visibleRouteIds")) {
@@ -1273,12 +1292,78 @@ json transitCoreRequest(const json& request) {
         for(auto& n:visibleTopology["nodes"]){std::set<std::string> ids;for(const auto& id:n["routeIds"])ids.insert(parents.at(id));n["routeIds"]=ids;n["interchange"]=n.value("isStation",false)&&ids.size()>1;}
         auto styled=plain;geometryStyle(styled,visible,st);scaleSpacing(styled);
         auto scene=rendered(visible,styled,cam,visibleTopology,spacingScale);
+        std::map<std::string,json> anchors;
+        for(const auto& n:visibleTopology["nodes"]) {
+            const auto id=n.at("id").get<std::string>(),stationId=n.value("stationId",std::string());
+            if(!stationId.empty()&&originalStations.count(stationId))anchors[id]=originalStations.at(stationId);
+            else if(originalPositions.count(id))anchors[id]=originalPositions.at(id);
+            else if(originalStations.count(id))anchors[id]=originalStations.at(id);
+        }
+        for(const auto& key:{"stations","mergedStations"})for(auto& station:scene[key]) {
+            const auto id=station.at("nodeId").get<std::string>();
+            if(anchors.count(id))station["originalPoint"]=anchors.at(id);
+        }
+        scene["originalRoutes"]=json::array();
+        for(const auto& route:scene["routes"]) {
+            const auto id=route.at("routeId").get<std::string>();
+            if(originalRoutes.count(id))scene["originalRoutes"].push_back({{"routeId",id},{"width",route["width"]},{"paths",originalRoutes.at(id)}});
+        }
         scene["displayNodes"]=json::array();scene["displaySegmentIds"]=json::array();scene["editNodeIds"]=json::array();
         for(const auto& n:visibleTopology["nodes"])if(!n["routeIds"].empty())scene["displayNodes"].push_back(n);
         std::set<std::string> logicalRoutes;for(const auto& r:visible.routes)logicalRoutes.insert(logicalId(r));
         auto shown=[&](const json& item){return std::any_of(item["routeIds"].begin(),item["routeIds"].end(),[&](const auto& id){return logicalRoutes.count(id.template get<std::string>());});};
         for(const auto& e:topology["segments"])if(shown(e))scene["displaySegmentIds"].push_back(e["id"]);
         for(const auto& n:topology["nodes"])if(shown(n))scene["editNodeIds"].push_back(n["id"]);
+        // Route order and displacement profiles are authoritative server geometry.
+        scene["routeDifferences"]=json::object();
+        for(const auto& route:scene["routes"]) {
+            const auto id=route.at("routeId").get<std::string>();
+            json samples=json::array(),paths=json::array();std::map<std::string,size_t> indices;
+            double maximum=0,minX=1e30,minY=1e30,maxX=-1e30,maxY=-1e30;
+            for(const auto& path:route["paths"])for(const auto& p:path["points"]) {
+                minX=std::min(minX,p[0].get<double>());maxX=std::max(maxX,p[0].get<double>());
+                minY=std::min(minY,p[1].get<double>());maxY=std::max(maxY,p[1].get<double>());
+            }
+            for(size_t ri=0;ri<visible.routes.size();++ri)if(logicalId(visible.routes[ri])==id)for(const auto& path:plain.route_path_topology[ri]) {
+                json stops=json::array();
+                for(int ni:path.nodes) {
+                    const auto& node=visibleTopology["nodes"][ni];const auto uid=node["id"].get<std::string>();
+                    if(!node.value("isStation",false)||!anchors.count(uid))continue;
+                    if(!indices.count(uid)) {
+                        const auto instance=std::find_if(scene["stations"].begin(),scene["stations"].end(),[&](const auto& item){return item["nodeId"]==uid&&std::find(item["routeIds"].begin(),item["routeIds"].end(),id)!=item["routeIds"].end();});
+                        if(instance==scene["stations"].end())continue;
+                        auto merged=std::find_if(scene["mergedStations"].begin(),scene["mergedStations"].end(),[&](const auto& item){return item["nodeId"]==uid;});
+                        json distances=json::object();
+                        for(const auto& variant:{"styled","merged","geometry"}) {
+                            const auto point=std::string(variant)=="geometry"?node["position"]:std::string(variant)=="merged"&&merged!=scene["mergedStations"].end()?(*merged)["point"]:(*instance)["point"];
+                            double length=std::hypot(point[0].template get<double>()-anchors[uid][0].get<double>(),point[1].template get<double>()-anchors[uid][1].get<double>());
+                            distances[variant]=length;maximum=std::max(maximum,length);
+                        }
+                        indices[uid]=samples.size();samples.push_back({{"node",node},{"distances",distances}});
+                    }
+                    if(stops.empty()||stops.back()!=indices.at(uid))stops.push_back(indices.at(uid));
+                }
+                if(!stops.empty())paths.push_back(stops);
+            }
+            const double chartWidth=std::max(960.0,40.0*double(samples.size()+1));
+            for(size_t i=0;i<samples.size();++i) {
+                const double x=samples.size()>1?40+(chartWidth-80)*i/(samples.size()-1):chartWidth/2;
+                samples[i]["base"]=json::array({x,180});
+                for(const auto& variant:{"styled","merged","geometry"})samples[i][variant]=json::array({x,180-(maximum>0?140*samples[i]["distances"][variant].get<double>()/maximum:0)});
+            }
+            json profile={{"samples",samples},{"paths",paths},{"width",chartWidth},{"maximum",maximum}};
+            if(minX<=maxX)profile["bounds"]={{"x",minX-10*spacingScale},{"y",minY-10*spacingScale},{"width",maxX-minX+20*spacingScale},{"height",maxY-minY+20*spacingScale}};
+            scene["routeDifferences"][id]=profile;
+        }
+        size_t longestRoute=0;
+        for(const auto& profile:scene["routeDifferences"])longestRoute=std::max(longestRoute,profile["samples"].size());
+        const double stationSpacing=longestRoute>1?std::max(40.0,880.0/double(longestRoute-1)):40.0;
+        for(auto& profile:scene["routeDifferences"]) {
+            auto& samples=profile["samples"];
+            profile["width"]=80+stationSpacing*double(samples.empty()?0:samples.size()-1);
+            profile["longestWidth"]=80+stationSpacing*double(longestRoute>0?longestRoute-1:0);
+            for(size_t i=0;i<samples.size();++i)for(const auto& variant:{"base","styled","merged","geometry"})samples[i][variant][0]=40+stationSpacing*i;
+        }
         geometryStyle(plain,visible,json::object());
         scene["geometryRoutes"]=rendered(visible,plain,cam,visibleTopology)["routes"];
         return scene;
@@ -1305,5 +1390,5 @@ json transitCoreRequest(const json& request) {
         }
         obstacles.push_back(std::move(obstacle));
     }
-    return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
+    return {{"spacingScale",spacingScale},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
 }
