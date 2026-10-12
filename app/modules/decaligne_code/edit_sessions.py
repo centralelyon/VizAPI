@@ -17,6 +17,7 @@ import time
 import uuid
 
 from fastapi import HTTPException
+from app.modules.decaligne_code.crossing_geometry import add_crossings
 
 from app.modules.decaligne_code.loom_runner import run_octi
 from app.modules.decaligne_code import storage, evaluation
@@ -46,7 +47,10 @@ def core_call(payload):
         raise HTTPException(502, "TransitMap core returned an invalid response.") from exc
     if result.returncode != 0 or "error" in data:
         raise HTTPException(422, data.get("error", "TransitMap core failed."))
-    return data
+    try:
+        return add_crossings(data, payload)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def geographic_map(source, state):
@@ -567,7 +571,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":

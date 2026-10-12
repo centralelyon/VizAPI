@@ -1314,6 +1314,26 @@ json transitCoreRequest(const json& request) {
         auto shown=[&](const json& item){return std::any_of(item["routeIds"].begin(),item["routeIds"].end(),[&](const auto& id){return logicalRoutes.count(id.template get<std::string>());});};
         for(const auto& e:topology["segments"])if(shown(e))scene["displaySegmentIds"].push_back(e["id"]);
         for(const auto& n:topology["nodes"])if(shown(n))scene["editNodeIds"].push_back(n["id"]);
+        // Edit metadata uses public segment IDs and the same unscaled pair values
+        // as the renderer. Only visible, non-obstacle route pairs are editable.
+        auto editStyle=canonical;geometryStyle(editStyle,shape,st);
+        std::map<std::string,size_t> editRoutes;
+        for(size_t ri=0;ri<shape.routes.size();++ri)
+            if(!shape.routes[ri].isObstacle&&logicalRoutes.count(shape.routes[ri].id))editRoutes[shape.routes[ri].id]=ri;
+        scene["sharedSegments"]=json::object();
+        for(const auto& edge:topology["segments"]) {
+            std::vector<size_t> members;
+            for(const auto& id:edge["routeIds"])if(editRoutes.count(id.get<std::string>()))members.push_back(editRoutes.at(id.get<std::string>()));
+            if(members.size()<2)continue;
+            json pairs=json::array();
+            for(size_t a=0;a<members.size();++a)for(size_t b=a+1;b<members.size();++b) {
+                const auto ai=members[a],bi=members[b];
+                pairs.push_back({{"a",shape.routes[ai].id},{"b",shape.routes[bi].id},
+                    {"aName",shape.routes[ai].name},{"bName",shape.routes[bi].name},
+                    {"spacing",editStyle.routes_spacing[ai][bi]}});
+            }
+            scene["sharedSegments"][edge["id"].get<std::string>()]={{"pairs",pairs}};
+        }
         // Route order and displacement profiles are authoritative server geometry.
         scene["routeDifferences"]=json::object();
         for(const auto& route:scene["routes"]) {
