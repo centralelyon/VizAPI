@@ -162,7 +162,7 @@ void Loader::loadRoutesJson(const json& j, GeoData& data) {
             || (props.contains("name") && props["name"].is_string());
         const bool kindSaysShapePoint =
             props.contains("kind") && props["kind"].is_string() && props["kind"].get<std::string>() == "shape_point";
-        if (!hasStationName && kindSaysShapePoint) continue;
+        if (kindSaysShapePoint) continue;
         if (!hasStationName) continue;
 
         Station s;

@@ -6,20 +6,20 @@ import math
 
 
 
-def flatten(commands, tolerance):
+def flatten(commands, tolerance, parameters=False):
     """Adaptive Bezier subdivision in the same canvas coordinates as the renderer."""
     result, current = [], None
-    def curve(points, depth=0):
+    def curve(points, depth=0, t0=0., t1=1.):
         a, b = points[0], points[-1]
         length = math.dist(a, b)
         error = max((abs((b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0])) / length
                      if length else math.dist(a, p)) for p in points[1:-1])
         if error <= tolerance or depth == 12:
-            return [b]
+            return [(b,t1)]
         levels = [points]
         while len(levels[-1]) > 1:
             levels.append([((a[0]+b[0])/2, (a[1]+b[1])/2) for a,b in zip(levels[-1], levels[-1][1:])])
-        return curve([row[0] for row in levels], depth+1) + curve([row[-1] for row in reversed(levels)], depth+1)
+        return curve([row[0] for row in levels], depth+1, t0, (t0+t1)/2) + curve([row[-1] for row in reversed(levels)], depth+1, (t0+t1)/2, t1)
     for index, command in enumerate(commands):
         kind = command['type']
         if kind == 'close':
@@ -31,11 +31,13 @@ def flatten(commands, tolerance):
             continue
         controls = ([current, (command['cx'], command['cy']), point] if kind == 'quadratic' else
                     [current, (command['c1x'], command['c1y']), (command['c2x'], command['c2y']), point] if kind == 'cubic' else None)
-        samples = curve(controls) if controls else [point]
-        for sample in samples:
+        samples = curve(controls) if controls else [(point,1.)]
+        previous_t=0.
+        for sample,t in samples:
             if math.dist(current, sample) > 1e-7:
-                result.append((current, sample, index))
+                result.append((current, sample, index, previous_t, t) if parameters else (current, sample, index))
             current = sample
+            previous_t=t
     return result
 
 
@@ -79,35 +81,40 @@ def route_data(routes):
     return paths,strokes
 
 
-def path_slice(paths,key,start,end,canonical_path):
-    """Transfer a network interval to its rendered path, on the server."""
-    canonical_parts,canonical_length=canonical_path
-    if key not in paths or canonical_length==0:return []
-    parts,length=paths[key]
-    def locate(distance):
-        if distance<=1e-5:return 0.
-        if distance>=canonical_length-1e-5:return length
-        a,b,lo,hi=next(part for part in canonical_parts if part[3]>=distance-1e-5)
-        fraction=max(0,min(1,(distance-lo)/(hi-lo)))
-        point=[a[i]+(b[i]-a[i])*fraction for i in (0,1)]
-        candidates=[]
-        for a,b,lo,hi in parts:
-            dx,dy=b[0]-a[0],b[1]-a[1]
-            t=max(0,min(1,((point[0]-a[0])*dx+(point[1]-a[1])*dy)/(dx*dx+dy*dy)))
-            along=lo+t*(hi-lo)
-            error=(point[0]-a[0]-t*dx)**2+(point[1]-a[1]-t*dy)**2
-            candidates.append((error+1e-8*(along-length*distance/canonical_length)**2,along))
-        return min(candidates)[1]
-    start,end=locate(start),locate(end)
-    commands=[]
-    for a,b,lo,hi in parts:
-        if hi<=start or lo>=end:continue
-        first=max(start,lo);last=min(end,hi)
-        def at(t):return [a[i]+(b[i]-a[i])*(t-lo)/(hi-lo) for i in (0,1)]
-        x,y=at(first)
-        if not commands:commands.append({'type':'move','x':x,'y':y})
-        x,y=at(last);commands.append({'type':'line','x':x,'y':y})
-    return commands
+def command_slice(commands,start,end):
+    """Trim by sampled arc length, but retain the original Bezier geometry."""
+    ranges={};distance=0.
+    for a,b,index,t0,t1 in flatten(commands,.1,True):
+        length=math.dist(a,b);lo=max(start,distance);hi=min(end,distance+length)
+        if hi>lo:
+            first=t0+(t1-t0)*(lo-distance)/length
+            last=t0+(t1-t0)*(hi-distance)/length
+            if index in ranges:ranges[index][1]=last
+            else:ranges[index]=[first,last]
+        distance+=length
+    def split(points,t):
+        rows=[points]
+        while len(rows[-1])>1:
+            rows.append([tuple(a[j]+(b[j]-a[j])*t for j in (0,1)) for a,b in zip(rows[-1],rows[-1][1:])])
+        return [row[0] for row in rows],[row[-1] for row in reversed(rows)]
+    result=[];current=None;previous_index=None
+    for index,command in enumerate(commands):
+        if command['type']=='close':current=None;continue
+        point=(command['x'],command['y'])
+        if current is not None and index in ranges:
+            kind=command['type'];points=[current]
+            if kind=='quadratic':points.append((command['cx'],command['cy']))
+            if kind=='cubic':points.extend([(command['c1x'],command['c1y']),(command['c2x'],command['c2y'])])
+            points.append(point);first,last=ranges[index]
+            points=split(points,last)[0]
+            if first:points=split(points,first/last)[1]
+            if previous_index!=index-1:result.append({'type':'move','x':points[0][0],'y':points[0][1]})
+            item={'type':kind,'x':points[-1][0],'y':points[-1][1]}
+            if kind=='quadratic':item.update(cx=points[1][0],cy=points[1][1])
+            if kind=='cubic':item.update(c1x=points[1][0],c1y=points[1][1],c2x=points[2][0],c2y=points[2][1])
+            result.append(item);previous_index=index
+        current=point
+    return result
 
 
 def network_elements(routes):
@@ -288,24 +295,10 @@ def crossing_records(atoms,orders,routes):
     for atom in atoms:
         atom['record']=orders.get(atom['id'],{})
         atom['order']=ordered_members(routes,atom['members'],atom['record'])
-    edge_records={}
-    for group in sorted(atoms,key=lambda g:g['record'].get('serial',0)):
-        if not group['record']:continue
-        for key in group['edges']:edge_records[key]=group['record']
-    # An unedited crossing inherits the order reaching it along its segments.
-    # Its cap must not repaint that propagated order with the default route order.
-    for atom in atoms:
-        if atom['record']:continue
-        point=atom['events'][0]['point']
-        incoming=[record for key,record in edge_records.items() if point in key
-                  and len(atom['members'].intersection(record['order']))>1]
-        atom['record']=max(incoming,key=lambda record:record.get('serial',0),default={})
-        atom['order']=ordered_members(routes,atom['members'],atom['record'])
-    return edge_records
 
 
 def crossing_scene(routes, network, orders, scale, mode, edit=None):
-    canonical,network_atoms,edges=network
+    _,network_atoms,edges=network
     atoms=[dict(atom) for atom in network_atoms]
     rendered,strokes=route_data(routes)
     route_map={r['routeId']:r for r in routes}
@@ -327,41 +320,27 @@ def crossing_scene(routes, network, orders, scale, mode, edit=None):
                 for eid in ids:orders[eid]=record
         group['record']=record
     if edit and not found:raise ValueError('Crossing changed; select it again')
-    # On a shared section, the latest adjacent edit supplies one coherent order.
-    # Paint entire graph intervals, not rectangular snippets at shape points.
-    edge_records=crossing_records(atoms,orders,routes)
+    crossing_records(atoms,orders,routes)
     for group in groups:
         record=max((atom['record'] for atom in group['atoms']),key=lambda record:record.get('serial',0),default={})
+        group['record']=record
         group['order']=ordered_members(routes,group['members'],record)
-    buckets=defaultdict(lambda:defaultdict(list))
-    for key,record in edge_records.items():
-        edge=edges[key]
-        order=ordered_members(routes,edge['routes'],record)
-        signature=(record['serial'],tuple(order))
-        for path,start,end in edge['intervals']:buckets[signature][path].append((start,end))
     paint=[]
-    for (serial,order),intervals in sorted(buckets.items()):
-        for rid in reversed(order):
-            for key,spans in intervals.items():
-                if key[0]!=rid:continue
-                merged=[]
-                for start,end in sorted(spans):
-                    if merged and start<=merged[-1][1]+1e-4:merged[-1][1]=max(end,merged[-1][1])
-                    else:merged.append([start,end])
-                for start,end in merged:
-                    commands=path_slice(rendered,key,start,end,canonical[key])
-                    if commands:paint.append({'routeId':rid,'commands':commands,'width':route_map[rid]['width'] if mode=='styled' else 1})
     output=[]
     for group in groups:
         x,y,right,bottom=group['box'];order=group['order'];members=group['members']
         marker_size=max(right-x,bottom-y)
         markers=[{'x':(x+right-marker_size)/2,'y':(y+bottom-marker_size)/2,'width':marker_size,'height':marker_size}]
-        # Preview area never limits propagation. Station symbols do not take part.
+        # The marker is the exact local order region; preview padding is display only.
         pad=max(marker_size*.25,4*scale)
         bounds=[x-pad,y-pad,right-x+2*pad,bottom-y+2*pad]
         local=[r['routeId'] for r in routes if r['routeId'] not in members]+list(reversed(order))
         layers=[{'routeId':rid,'width':route_map[rid]['width'] if mode=='styled' else 1} for rid in local
                 if any(clip_line(a,b,bounds) for a,b in route_strokes[rid])]
+        if group['record']:
+            paint.append({'id':group['id'],'bounds':markers[0],
+                          'routes':[{'routeId':rid,'width':route_map[rid]['width'] if mode=='styled' else 1,
+                                     'paths':route_map[rid]['paths']} for rid in local]})
         factor=170/max(bounds[2],bounds[3],1);height=min(24,100/max(1,len(order)-1));projection=[]
         for level,rid in enumerate(reversed(order)):
             def project(p):
@@ -372,18 +351,26 @@ def crossing_scene(routes, network, orders, scale, mode, edit=None):
             projection.append({'routeId':rid,'segments':segments,'plate':list(map(project,[(bx,by),(bx+w,by),(bx+w,by+h),(bx,by+h)])),
                                'width':max(2,min(12,(route_map[rid]['width'] if mode=='styled' else 1)*scale*factor))})
         size=max(bounds[2],bounds[3])
-        # A small crossing-only cap preserves the next crossing's own order.
-        # No rectangular redraw is allowed to end at a shape point.
-        caps=[]
-        for atom in group['atoms']:
-            ax,ay,ar,ab=atom['box']
-            local_order=[r['routeId'] for r in routes if r['routeId'] not in atom['members']]+list(reversed(atom['order']))
-            caps.append({'id':atom['id'],'bounds':{'x':ax,'y':ay,'width':ar-ax,'height':ab-ay},
-                         'layers':[{'routeId':rid,'width':route_map[rid]['width'] if mode=='styled' else 1} for rid in local_order]})
-        output.append({'id':group['id'],'caps':caps,'eventIds':[e['id'] for e in group['events']],'bounds':dict(zip(('x','y','width','height'),[x,y,right-x,bottom-y])),
+        output.append({'id':group['id'],'eventIds':[e['id'] for e in group['events']],'bounds':dict(zip(('x','y','width','height'),[x,y,right-x,bottom-y])),
                        'view':{'x':(x+right-size)/2,'y':(y+bottom-size)/2,'w':size,'h':size},
                        'markers':markers,'order':order,'layers':layers,'projection':projection})
     return output,paint
+
+
+def crossing_details(scene,shape):
+    nodes={node['id']:node for node in shape.get('nodes',[])}
+    editable=set(scene.get('editNodeIds',nodes))
+    for mode in ('styled','geometry'):
+        for crossing in scene[mode+'Crossings']:
+            view=crossing['view'];bounds=[view['x'],view['y'],view['w'],view['h']]
+            def inside(p):return bounds[0]<=p[0]<=bounds[0]+bounds[2] and bounds[1]<=p[1]<=bounds[1]+bounds[3]
+            crossing['shapePoints']=[node for node in nodes.values() if node['id'] in editable and not node['isStation'] and inside(node['position'])]
+            pairs={}
+            for edge in shape.get('segments',[]):
+                shared=scene.get('sharedSegments',{}).get(edge['id'])
+                if shared and clip_line(nodes[edge['a']]['position'],nodes[edge['b']]['position'],bounds):
+                    for pair in shared['pairs']:pairs[tuple(sorted((pair['a'],pair['b'])))]=pair
+            crossing['spacingPairs']=list(pairs.values())
 
 
 def add_crossings(result,payload):
@@ -397,11 +384,20 @@ def add_crossings(result,payload):
         key=json.dumps(geometry,separators=(',',':'))
         if key not in networks:networks[key]=network_elements(geometry)
         network=networks[key]
+        styled_network=network_elements(scene.get('routes',[]))
+        canonical_paths,canonical_atoms,canonical_edges=network
+        used=set()
+        for atom in styled_network[1]:
+            matches=[a for a in canonical_atoms if a['id'] not in used and atom['members']<=a['members']]
+            if matches:
+                nearest=min(matches,key=lambda a:math.dist(a['events'][0]['point'],atom['events'][0]['point']))
+                used.add(nearest['id']);atom['id']=nearest['id'];atom['events'][0]['id']=nearest['id']
         # Process the edited mode first; both views share the same network order.
         modes=[('styled','routes'),('geometry','geometryRoutes')]
         if edit and edit['mode']=='geometry':modes.reverse()
         for mode,key in modes:
-            scene[mode+'Crossings'],scene[mode+'CrossingPaint']=crossing_scene(scene.get(key,[]),network,orders,scale,mode,
+            scene[mode+'Crossings'],scene[mode+'CrossingPaint']=crossing_scene(scene.get(key,[]),styled_network if mode=='styled' else network,orders,scale,mode,
                 edit if edit and edit['side']==side and edit['mode']==mode else None)
+        crossing_details(scene,result.get('shape',state.get('shape',{})))
         scene['crossingOrders']=orders
     return result

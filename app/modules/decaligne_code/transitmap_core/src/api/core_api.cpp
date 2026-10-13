@@ -1325,9 +1325,11 @@ json transitCoreRequest(const json& request) {
             std::vector<size_t> members;
             for(const auto& id:edge["routeIds"])if(editRoutes.count(id.get<std::string>()))members.push_back(editRoutes.at(id.get<std::string>()));
             if(members.size()<2)continue;
+            // Match the spacing solver: only adjacent routes control lane offsets.
+            std::sort(members.begin(),members.end());
             json pairs=json::array();
-            for(size_t a=0;a<members.size();++a)for(size_t b=a+1;b<members.size();++b) {
-                const auto ai=members[a],bi=members[b];
+            for(size_t i=1;i<members.size();++i) {
+                const auto ai=members[i-1],bi=members[i];
                 pairs.push_back({{"a",shape.routes[ai].id},{"b",shape.routes[bi].id},
                     {"aName",shape.routes[ai].name},{"bName",shape.routes[bi].name},
                     {"spacing",editStyle.routes_spacing[ai][bi]}});

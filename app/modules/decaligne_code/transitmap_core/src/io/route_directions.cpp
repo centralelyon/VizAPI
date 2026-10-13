@@ -112,9 +112,10 @@ Shape loadDirectedTopology(const json& map) {
     for(const auto& f:map.at("features"))if(f["geometry"]["type"]=="Point") {
         const auto& p=f.at("properties");const auto uid=id(p.at("id"));if(nodes.count(uid))continue;
         ShapeNode n;n.id=int(s.nodes.size());n.uid=uid;n.pos=coordinate(f["geometry"]["coordinates"],planar);
-        if(p.contains("station_id")||p.contains("station_label")||p.contains("name")) {
+        if(p.value("kind",std::string())!="shape_point"&&(p.contains("station_id")||p.contains("station_label")||p.contains("name"))) {
             n.type=ShapeNodeType::Station;n.station_id=p.value("station_id","");n.name=p.value("station_label",p.value("name",std::string()));
         }
+        if(n.type==ShapeNodeType::ShapePoint)n.name=p.value("name",std::string());
         nodes[uid]=n.id;reserved.insert(uid);s.nodes.push_back(n);
     }
     int serial=0;
