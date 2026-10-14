@@ -133,7 +133,7 @@ def save_upload(
     if (
         not isinstance(canvas, dict)
         or canvas.get("side")
-        not in ("left", "right")
+        not in ("left", "right", "bottomLeft", "bottomRight")
         or canvas.get("mode")
         not in ("geometry", "styled")
     ):

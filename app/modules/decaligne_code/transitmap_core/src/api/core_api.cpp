@@ -1031,6 +1031,7 @@ void updateRoutes(Shape& shape,json& state,const json& request) {
     for(auto& id:state["bidirectionalRoutes"])if(ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());
     for(auto& st:state["styles"]){auto old=st.value("routes",json::object()),next=json::object();for(auto it=old.begin();it!=old.end();++it)next[ids.count(it.key())?ids.at(it.key()):it.key()]=it.value();st["routes"]=next;
         for(auto& pair:st["pairs"])for(const auto* k:{"a","b"})if(ids.count(pair[k].get<std::string>()))pair[k]=ids.at(pair[k].get<std::string>());}
+    if(state.contains("cutRouteIds"))for(auto& id:state["cutRouteIds"])if(ids.count(id.get<std::string>()))id=ids.at(id.get<std::string>());
     for(auto& r:shape.routes)if(ids.count(r.id)){auto old=r.id;r.id=ids.at(old);r.name=names.at(old);}
 }
 
@@ -1044,6 +1045,15 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
             else proposed.x=origin.x;
             s.nodes[n].pos=proposed;
         } else s.nodes[n].pos=req.value("snap",true)?snapShapeStationPosition(s,n,proposed,pi):proposed;
+    } else if(op=="delete-segment") {
+        const int removed=segmentIndex(s,req.at("segmentId"));
+        // Removing membership breaks every route here; never reconnect endpoints.
+        for(auto& route:s.routes) {
+            auto& edges=route.segmentIndices;
+            edges.erase(std::remove(edges.begin(),edges.end(),removed),edges.end());
+            for(int& edge:edges)if(edge>removed)--edge;
+        }
+        s.segments.erase(s.segments.begin()+removed);
     } else if(op=="delete-node") {
         require(deleteShapeNodes(s,{nodeIndex(s,req.at("nodeId"))}),"Delete failed");
     } else if(op=="merge-stations") {
@@ -1108,6 +1118,7 @@ json transitCoreRequest(const json& request) {
             state["directionalData"]=map["transitMapDirections"];
         } else if(op!="replace-map" || !request.value("preserveRouteDirections",false)) state.erase("directionalData");
         state["bidirectionalRoutes"]=map.value("bidirectionalRoutes",json::array());
+        state.erase("cutRouteIds");
         // Fresh generation after LOOM; never match new vector indices to old IDs.
         state["pathIds"]=json::object(); identities(shape,state);
         state["shapeRevision"]=state.value("shapeRevision",0ULL)+1;
@@ -1198,6 +1209,20 @@ json transitCoreRequest(const json& request) {
     if(op=="update-routes"){state["styles"]=request.value("styles",state.value("styles",json::object()));updateRoutes(shape,state,request);}
     if(op!="session" && op!="replace-map" && op!="loom-apply" && op!="append-map" && op!="update-routes") {
         Shape before=shape;DrawnRoute drawn;
+        if(op=="delete-segment") {
+            const int removed=segmentIndex(shape,request.at("segmentId"));
+            std::set<std::string> cut=state.value("cutRouteIds",std::set<std::string>{});
+            for(const auto& route:shape.routes)if(std::find(route.segmentIndices.begin(),route.segmentIndices.end(),removed)!=route.segmentIndices.end()) {
+                // Raw GTFS display paths no longer describe a route after a cut.
+                // Keep its remaining directed incidences, and display edited topology.
+                if(!cut.count(route.id))for(const auto& t:state.value("shapeTraversals",json::object()).value("traversals",json::array()))if(t["routeId"]==route.id) {
+                    const auto& nodes=t["orderedNodes"];
+                    for(size_t i=1;i<nodes.size();++i)state["routeTraversals"].push_back({{"routeId",route.id},{"from",nodes[i-1]},{"to",nodes[i]},{"directionId",t["directionId"]},{"patternId",t["patternId"]}});
+                }
+                cut.insert(route.id);
+            }
+            state["cutRouteIds"]=cut;
+        }
         const bool feature=op=="draw-line-feature"||op=="draw-region-feature";
         if(op=="draw-route")drawn=drawRoute(shape,request,cam);
         else if(feature)drawFeature(state,op,request,cam);
@@ -1232,8 +1257,9 @@ json transitCoreRequest(const json& request) {
     auto selected=request.value("bidirectionalRoutes",state.value("bidirectionalRoutes",json::array()));
     require(selected.is_array(),"bidirectionalRoutes must be an array");
     std::set<std::string> available,enabled;
+    const auto cutRoutes=state.value("cutRouteIds",std::set<std::string>{});
     if(state.contains("directionalData"))for(const auto& r:state["directionalData"]["routes"])
-        if(!r.at("patterns").empty()&&std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& s){return s.id==r.at("routeId");}))available.insert(r.at("routeId"));
+        if(!cutRoutes.count(r.at("routeId").get<std::string>())&&!r.at("patterns").empty()&&std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& s){return s.id==r.at("routeId");}))available.insert(r.at("routeId"));
     for(const auto& id:selected) {
         auto key=identifier(id);
         if(available.count(key))enabled.insert(key);

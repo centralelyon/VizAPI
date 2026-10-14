@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from app.modules.decaligne_code.crossing_geometry import add_crossings
 
 from app.modules.decaligne_code.loom_runner import run_octi
-from app.modules.decaligne_code import storage, evaluation
+from app.modules.decaligne_code import storage, evaluation, comments as map_comments
 
 MAX_BODY = 16 * 1024 * 1024
 CORE_TIMEOUT = 45
@@ -99,17 +99,29 @@ class EditSessions:
             CREATE INDEX IF NOT EXISTS idx_edit_checkpoints_session
             ON edit_checkpoints(session_id)
         """)
+        conn.execute("CREATE TABLE IF NOT EXISTS map_comments (id TEXT NOT NULL, session_id TEXT NOT NULL, created REAL NOT NULL, data TEXT NOT NULL, PRIMARY KEY(session_id, id))")
+        # Upgrade the first annotation table: imported maps may retain the same IDs.
+        columns = conn.execute("PRAGMA table_info(map_comments)").fetchall()
+        if sum(bool(column[5]) for column in columns) == 1:
+            conn.execute("ALTER TABLE map_comments RENAME TO map_comments_old")
+            conn.execute("CREATE TABLE map_comments (id TEXT NOT NULL, session_id TEXT NOT NULL, created REAL NOT NULL, data TEXT NOT NULL, PRIMARY KEY(session_id, id))")
+            conn.execute("INSERT INTO map_comments SELECT * FROM map_comments_old")
+            conn.execute("DROP TABLE map_comments_old")
+        conn.execute("CREATE TABLE IF NOT EXISTS map_comment_counters (session_id TEXT PRIMARY KEY, next_index INTEGER NOT NULL)")
+        conn.commit()
         try:
             with conn:
                 yield conn
         finally:
             conn.close()
 
-    @staticmethod
-    def public(result, session_id, revision):
+    def public(self, result, session_id, revision):
         response = {**{k: v for k, v in result.items() if k != "state"}, "sessionId": session_id, "revision": revision}
         if "shape" in result:
             response["geographicMap"] = geographic_map(result.get("state", {}).get("original", {}), result.get("state", {}))
+        if "shape" in result:
+            with self.connect() as conn:
+                response["comments"] = [map_comments.display(c, result["state"]) for c in map_comments.records(conn, session_id, result["state"])]
         return response
 
     def create(self, body):
@@ -133,6 +145,8 @@ class EditSessions:
             )
 
             conn.execute("DELETE FROM edit_checkpoints WHERE session_id NOT IN (SELECT id FROM edit_sessions)")
+            conn.execute("DELETE FROM map_comments WHERE session_id NOT IN (SELECT id FROM edit_sessions)")
+            conn.execute("DELETE FROM map_comment_counters WHERE session_id NOT IN (SELECT id FROM edit_sessions)")
 
             if conn.execute(
                 "SELECT COUNT(*) FROM edit_sessions"
@@ -165,6 +179,7 @@ class EditSessions:
                 ),
             )
 
+            map_comments.seed(conn, sid, body["map"].get("transitMapComments"))
 
         response = self.public(
             result,
@@ -374,6 +389,20 @@ class EditSessions:
             return result
 
     def _apply(self, operation, body):
+        if operation == "select-nearby-nodes":
+            sid, revision, state = self.read(body)
+            nodes = [n for n in state["shape"]["nodes"] if not n["isStation"]]
+            anchor = next((n for n in nodes if n["id"] == body.get("anchorId")), None)
+            if anchor is None:
+                raise HTTPException(422, "Select a shape point first")
+            nodes.sort(key=lambda n: ((n["x"]-anchor["x"])**2+(n["y"]-anchor["y"])**2, n["id"]))
+            ordered = [anchor["id"]] + [n["id"] for n in nodes if n["id"] != anchor["id"]]
+            count = len(set(body.get("nodeIds", [])) & set(ordered))
+            for event in body.get("wheelEvents", []):
+                if event["delta"]:
+                    count = max(1, min(len(ordered), count + (1 if event["delta"] < 0 else -1)))
+            return {"sessionId": sid, "revision": revision, "nodes": ordered[:max(1, count)], "segments": []}
+
         if operation == "move-background-image":
             sid, revision, _ = self.read(body)
             values = [body.get(k) for k in ("x", "y", "fromX", "fromY", "toX", "toY")]
@@ -403,6 +432,8 @@ class EditSessions:
                 "state": state,
             })
 
+            with self.connect() as conn:
+                exported["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
             return storage.save_upload(
                 exported["map"],
                 body,
@@ -587,6 +618,8 @@ class EditSessions:
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)
         if operation == "export":
+            with self.connect() as conn:
+                result["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
             # Export is a snapshot at the requested revision, not a mutation.
             return self.public(result, sid, revision)
         result["state"]["original"] = state["original"]
