@@ -142,9 +142,10 @@ json encode(const Shape& s, const Camera& camera, const StyledShape& styled, jso
         }
         std::map<int,int> degree;
         for(int e:r.segmentIndices){++degree[s.segments[e].a];++degree[s.segments[e].b];}
-        json endpoints=json::array();
+        json endpoints=json::array(),endpointIds=json::array(),stations=json::array();
+        for(const auto& entry:degree)if(isStationLike(s.nodes[entry.first].type))stations.push_back({{"id",s.nodes[entry.first].uid},{"name",s.nodes[entry.first].name.empty()?s.nodes[entry.first].uid:s.nodes[entry.first].name}});
         auto endpoint=[&](int index){const auto& n=s.nodes[index];return n.name.empty()?n.station_id:n.name;};
-        for(const auto& entry:degree)if(entry.second==1)endpoints.push_back(endpoint(entry.first));
+        for(const auto& entry:degree)if(entry.second==1){endpoints.push_back(endpoint(entry.first));endpointIds.push_back(s.nodes[entry.first].uid);}
         if(endpoints.empty()&&!styled.route_path_topology[ri].empty()) {
             const auto& ns=styled.route_path_topology[ri].front().nodes;
             if(!ns.empty()){endpoints.push_back(endpoint(ns.front()));endpoints.push_back(endpoint(ns.back()));}
@@ -160,7 +161,7 @@ json encode(const Shape& s, const Camera& camera, const StyledShape& styled, jso
                 if(start!=s.nodes.end()&&end!=s.nodes.end())endpoints=json::array({endpoint(int(start-s.nodes.begin())),endpoint(int(end-s.nodes.begin()))});
             }
         }
-        routes.push_back({{"endpoints",endpoints},{"id",r.id},{"name",r.name},{"color",color(r.color)},{"rgb",json::array({r.color[0],r.color[1],r.color[2]})},
+        routes.push_back({{"stations",stations},{"endpointIds",endpointIds},{"endpoints",endpoints},{"id",r.id},{"name",r.name},{"color",color(r.color)},{"rgb",json::array({r.color[0],r.color[1],r.color[2]})},
             {"width",r.route_width},{"isObstacle",r.isObstacle},{"obstacleKind",int(r.obstacleKind)},{"segmentIds",ids},{"paths",paths}});
     }
     state["pathIds"]=registry;
@@ -1035,6 +1036,55 @@ void updateRoutes(Shape& shape,json& state,const json& request) {
     for(auto& r:shape.routes)if(ids.count(r.id)){auto old=r.id;r.id=ids.at(old);r.name=names.at(old);}
 }
 
+// Keep only route-owned geometry after a cut or a range change.
+void pruneUnused(Shape& s) {
+    std::set<int> used;for(const auto& r:s.routes)for(int e:r.segmentIndices)used.insert(e);
+    std::vector<int> em(s.segments.size(),-1);std::vector<ShapeSegment> edges;
+    for(int e:used){em[e]=int(edges.size());edges.push_back(s.segments[e]);}
+    for(auto& r:s.routes)for(int& e:r.segmentIndices)e=em[e];s.segments=edges;
+    std::set<int> usedNodes;for(const auto& e:s.segments){usedNodes.insert(e.a);usedNodes.insert(e.b);}
+    std::vector<int> nm(s.nodes.size(),-1);std::vector<ShapeNode> nodes;
+    for(int n:usedNodes){nm[n]=int(nodes.size());nodes.push_back(s.nodes[n]);}
+    for(auto& e:s.segments){e.a=nm[e.a];e.b=nm[e.b];}s.nodes=nodes;
+}
+json separateRoutes(Shape& s,json& state,const std::set<std::string>& affected) {
+    json replacements=json::object();std::vector<ShapeRoute> routes;
+    std::set<std::string> names;for(const auto& r:s.routes)names.insert(r.id);
+    for(const auto& r:s.routes) {
+        if(!affected.count(r.id)){routes.push_back(r);continue;}
+        std::set<int> remaining(r.segmentIndices.begin(),r.segmentIndices.end());
+        std::vector<std::vector<int>> parts;
+        while(!remaining.empty()) {
+            std::vector<int> part{*remaining.begin()};remaining.erase(part.front());
+            for(size_t i=0;i<part.size();++i) {
+                const auto& a=s.segments[part[i]];
+                for(auto it=remaining.begin();it!=remaining.end();) {
+                    const auto& b=s.segments[*it];
+                    if(a.a==b.a||a.a==b.b||a.b==b.a||a.b==b.b){part.push_back(*it);it=remaining.erase(it);}else ++it;
+                }
+            }
+            parts.push_back(part);
+        }
+        if(parts.size()==1){routes.push_back(r);continue;}
+        replacements[r.id]=json::array();int suffix=1;
+        for(const auto& part:parts) {
+            auto child=r;do{child.id=r.id+"_"+std::to_string(suffix++);}while(names.count(child.id));names.insert(child.id);
+            child.name=r.name+"_"+std::to_string(suffix-1);child.segmentIndices=part;routes.push_back(child);
+            replacements[r.id].push_back({{"id",child.id},{"name",child.name},{"previousName",r.name}});
+        }
+    }
+    json records=json::array();
+    for(const auto& record:state.value("routeTraversals",json::array())) {
+        const auto old=record.at("routeId").get<std::string>();
+        if(!replacements.contains(old)){records.push_back(record);continue;}
+        for(const auto& child:replacements[old])for(const auto& r:routes)if(r.id==child["id"]) {
+            for(int ei:r.segmentIndices){const auto& e=s.segments[ei];auto a=s.nodes[e.a].uid,b=s.nodes[e.b].uid;
+                if((a==record["from"]&&b==record["to"])||(b==record["from"]&&a==record["to"])) {auto copy=record;copy["routeId"]=r.id;records.push_back(copy);break;}}
+        }
+    }
+    state["routeTraversals"]=records;s.routes=routes;pruneUnused(s);return replacements;
+}
+
 void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
     if(op=="move-node") {
         int n=nodeIndex(s,req.at("nodeId")); Point proposed=fromScreen(cam,req);
@@ -1045,17 +1095,34 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
             else proposed.x=origin.x;
             s.nodes[n].pos=proposed;
         } else s.nodes[n].pos=req.value("snap",true)?snapShapeStationPosition(s,n,proposed,pi):proposed;
-    } else if(op=="delete-segment") {
-        const int removed=segmentIndex(s,req.at("segmentId"));
-        // Removing membership breaks every route here; never reconnect endpoints.
-        for(auto& route:s.routes) {
-            auto& edges=route.segmentIndices;
-            edges.erase(std::remove(edges.begin(),edges.end(),removed),edges.end());
-            for(int& edge:edges)if(edge>removed)--edge;
+    } else if(op=="trim-route") {
+        auto& route=s.routes[routeIndex(s,req.at("routeId"))];
+        const int start=nodeIndex(s,req.at("fromNodeId")),end=nodeIndex(s,req.at("toNodeId"));
+        require(start!=end,"Choose two different stations");
+        std::vector<double> distance(s.nodes.size(),1e100);std::vector<int> previous(s.nodes.size(),-1);std::set<int> done;
+        distance[start]=0;
+        while(!done.count(end)) {
+            int at=-1;for(size_t i=0;i<distance.size();++i)if(!done.count(int(i))&&(at<0||distance[i]<distance[at]))at=int(i);
+            require(at>=0&&distance[at]<1e100,"Selected stations are not connected on this route");done.insert(at);
+            for(int ei:route.segmentIndices){const auto& e=s.segments[ei];int next=e.a==at?e.b:e.b==at?e.a:-1;if(next<0)continue;
+                auto a=s.nodes[at].pos,b=s.nodes[next].pos;double d=distance[at]+std::hypot(a.x-b.x,a.y-b.y);
+                if(d<distance[next]){distance[next]=d;previous[next]=ei;}}
         }
-        s.segments.erase(s.segments.begin()+removed);
+        std::vector<int> keep;for(int n=end;n!=start;){int ei=previous[n];keep.push_back(ei);const auto& e=s.segments[ei];n=e.a==n?e.b:e.a;}
+        route.segmentIndices=keep;
+    } else if(op=="delete-segment"||op=="delete-selection") {
+        std::set<int> removed;
+        if(req.contains("segmentId"))removed.insert(segmentIndex(s,req["segmentId"]));
+        for(const auto& id:req.value("segmentIds",json::array()))removed.insert(segmentIndex(s,id));
+        for(auto& route:s.routes){auto& edges=route.segmentIndices;edges.erase(std::remove_if(edges.begin(),edges.end(),[&](int e){return removed.count(e);}),edges.end());}
+        // Preserve the existing point-deletion behavior (join remaining neighbors).
+        std::vector<int> nodes;for(const auto& id:req.value("nodeIds",json::array()))nodes.push_back(nodeIndex(s,id));
+        if(!nodes.empty())require(deleteShapeNodes(s,nodes),"Delete failed");
     } else if(op=="delete-node") {
-        require(deleteShapeNodes(s,{nodeIndex(s,req.at("nodeId"))}),"Delete failed");
+        std::vector<int> nodes;
+        if(req.contains("nodeId"))nodes.push_back(nodeIndex(s,req["nodeId"]));
+        for(const auto& id:req.value("nodeIds",json::array()))nodes.push_back(nodeIndex(s,id));
+        require(deleteShapeNodes(s,nodes),"Delete failed");
     } else if(op=="merge-stations") {
         std::vector<int> ns;for(const auto& id:req.at("nodeIds"))ns.push_back(nodeIndex(s,id));
         require(ns.size()>=2,"Select at least two stations");
@@ -1110,7 +1177,7 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
 json transitCoreRequest(const json& request) {
     const auto op=request.value("op",std::string("session"));
     if(op=="gtfs-patterns")return {{"directionalData",gtfsDirectionalPatterns(request.at("tables"))}};
-    json state=request.value("state",json::object()); Shape shape;
+    json state=request.value("state",json::object()),routeReplacements=json::object(); std::set<std::string> affectedRoutes; Shape shape;
     if(op=="session" || op=="replace-map") {
         auto map=request.at("map"); shape=loadMap(map);
         if(map.contains("transitMapDirections")) {
@@ -1135,6 +1202,7 @@ json transitCoreRequest(const json& request) {
         Route bounds;for(const auto& n:shape.nodes)bounds.segments.push_back({n.pos});data.routes.push_back(bounds);
         cam.fitToData(data);auto center=cam.screenToWorld(600,400);
         state["transform"]={{"x",center.x},{"y",center.y},{"scale",cam.getScale()}};
+        if(map.contains("transitMapTransform")){const auto& t=map["transitMapTransform"];state["transform"]={{"x",number(t,"x",0,-1e12,1e12)},{"y",number(t,"y",0,-1e12,1e12)},{"scale",number(t,"scale",1,1e-12,1e12)}};}
         state["planar"]=map.value("coordinateSystem",std::string("auto"))=="planar";
         state["obstacles"]=request.value("obstacles",map.value("transitMapObstacles",json{{"type","FeatureCollection"},{"features",json::array()}}));
     } else if(op=="loom-apply")shape=applyNativeLayout(state,request.at("map"));
@@ -1164,7 +1232,7 @@ json transitCoreRequest(const json& request) {
             }
             exportRouteDirections(graph,state.value("routeTraversals",json::array()));
         }
-        graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
+        graph["bidirectionalRoutes"]=state["bidirectionalRoutes"];graph["transitMapTransform"]=state["transform"];graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
     if(op=="append-map") {
         auto incoming=loadMap(request.at("map"));
@@ -1209,10 +1277,16 @@ json transitCoreRequest(const json& request) {
     if(op=="update-routes"){state["styles"]=request.value("styles",state.value("styles",json::object()));updateRoutes(shape,state,request);}
     if(op!="session" && op!="replace-map" && op!="loom-apply" && op!="append-map" && op!="update-routes") {
         Shape before=shape;DrawnRoute drawn;
-        if(op=="delete-segment") {
-            const int removed=segmentIndex(shape,request.at("segmentId"));
+        if(op=="delete-segment"||op=="delete-selection"||op=="delete-node"||op=="trim-route") {
+            std::set<int> removed;
+            if(request.contains("segmentId"))removed.insert(segmentIndex(shape,request["segmentId"]));
+            for(const auto& id:request.value("segmentIds",json::array()))removed.insert(segmentIndex(shape,id));
+            if(op=="trim-route")for(int ei:shape.routes[routeIndex(shape,request.at("routeId"))].segmentIndices)removed.insert(ei);
+            auto deletedNodes=request.value("nodeIds",json::array());if(request.contains("nodeId"))deletedNodes.push_back(request["nodeId"]);
+            for(const auto& id:deletedNodes){int n=nodeIndex(shape,id);for(size_t i=0;i<shape.segments.size();++i)if(shape.segments[i].a==n||shape.segments[i].b==n)removed.insert(int(i));}
             std::set<std::string> cut=state.value("cutRouteIds",std::set<std::string>{});
-            for(const auto& route:shape.routes)if(std::find(route.segmentIndices.begin(),route.segmentIndices.end(),removed)!=route.segmentIndices.end()) {
+            for(const auto& route:shape.routes)if(std::any_of(route.segmentIndices.begin(),route.segmentIndices.end(),[&](int e){return removed.count(e);})) {
+                affectedRoutes.insert(route.id);
                 // Raw GTFS display paths no longer describe a route after a cut.
                 // Keep its remaining directed incidences, and display edited topology.
                 if(!cut.count(route.id))for(const auto& t:state.value("shapeTraversals",json::object()).value("traversals",json::array()))if(t["routeId"]==route.id) {
@@ -1237,6 +1311,9 @@ json transitCoreRequest(const json& request) {
             if(op=="draw-route")for(size_t i=1;i<drawn.nodes.size();++i)
                 state["routeTraversals"].push_back({{"routeId",drawn.id},{"from",shape.nodes[drawn.nodes[i-1]].uid},{"to",shape.nodes[drawn.nodes[i]].uid}});
         }
+    }
+    if(op=="delete-segment"||op=="delete-selection"||op=="delete-node"||op=="trim-route") {
+        routeReplacements=separateRoutes(shape,state,affectedRoutes);identities(shape,state);
     }
     if(op=="draw-line-feature"||op=="draw-region-feature"||op=="draw-route")shape=integrateFeatures(shape,state);
     if(op=="draw-region-feature") {
@@ -1271,6 +1348,10 @@ json transitCoreRequest(const json& request) {
     // Two comparison styles share one authoritative topology/revision.
     auto styles=op=="update-routes"?state["styles"]:request.value("styles",state.value("styles",json::object()));
     if(request.contains("style"))styles["right"]=request["style"];
+    for(auto& st:styles)for(auto it=routeReplacements.begin();it!=routeReplacements.end();++it) {
+        for(const auto& child:it.value())if(st.value("routes",json::object()).contains(it.key()))st["routes"][child["id"].get<std::string>()]=st["routes"][it.key()];
+        if(st.contains("visibleRouteIds")){json ids=json::array();for(const auto& id:st["visibleRouteIds"])if(id==it.key()){for(const auto& child:it.value())ids.push_back(child["id"]);}else ids.push_back(id);st["visibleRouteIds"]=ids;}
+    }
     state["styles"]=styles;json scenes=json::object();
     Shape renderShape;StyledShape renderCanonical;json renderTopology;
     if(!enabled.empty()) {
@@ -1438,5 +1519,5 @@ json transitCoreRequest(const json& request) {
         }
         obstacles.push_back(std::move(obstacle));
     }
-    return {{"spacingScale",spacingScale},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
+    return {{"routeReplacements",routeReplacements},{"spacingScale",spacingScale},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
 }

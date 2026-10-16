@@ -19,7 +19,7 @@ IDENTIFIER = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 UI_ACTIONS = {'session-start', 'style-change', 'style-select', 'mode-change',
               'edit-mode', 'side-change', 'snap-change', 'undo', 'redo'}
 OPERATIONS = {'move-node', 'delete-node', 'merge-stations', 'split-station',
-              'split-segment', 'delete-segment', 'add-station', 'add-route', 'append-map', 'update-routes', 'delete-route',
+              'split-segment', 'delete-segment', 'delete-selection', 'trim-route', 'add-station', 'add-route', 'append-map', 'update-routes', 'delete-route',
               'restore', 'loom', 'upload', 'draw-route', 'draw-line-feature', 'draw-region-feature', 'move-region-feature', 'scale-region-feature', 'reshape-region-feature', 'delete-region-feature', 'apply-regions'}
 
 

@@ -395,6 +395,8 @@ class EditSessions:
             anchor = next((n for n in nodes if n["id"] == body.get("anchorId")), None)
             if anchor is None:
                 raise HTTPException(422, "Select a shape point first")
+            route_ids = set(anchor["routeIds"])
+            nodes = [n for n in nodes if n["id"] == anchor["id"] or route_ids.intersection(n["routeIds"])]
             nodes.sort(key=lambda n: ((n["x"]-anchor["x"])**2+(n["y"]-anchor["y"])**2, n["id"]))
             ordered = [anchor["id"]] + [n["id"] for n in nodes if n["id"] != anchor["id"]]
             count = len(set(body.get("nodeIds", [])) & set(ordered))
@@ -434,6 +436,8 @@ class EditSessions:
 
             with self.connect() as conn:
                 exported["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
+            if body.get("canvasState") is not None:
+                exported["map"]["transitMapCanvasState"] = {"version": 1, **body["canvasState"]}
             return storage.save_upload(
                 exported["map"],
                 body,
@@ -602,7 +606,7 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("fromNodeId", "toNodeId", "crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         payload.update(op=operation, state=state)
         if operation == "loom":

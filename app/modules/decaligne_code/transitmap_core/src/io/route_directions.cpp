@@ -323,12 +323,14 @@ json editRouteDirections(const Shape& before,const Shape& after,const json& reco
         for(auto& r:changed)if(routes.count(r.at("routeId")))for(const auto* key:{"from","to"})if(r.at(key)==req.at("nodeId"))r[key]=added;
     } else if(op=="add-route"&&req.contains("nodeIds")) {
         const auto& ns=req.at("nodeIds");for(size_t i=1;i<ns.size();++i)changed.push_back({{"routeId",id(req.at("routeId"))},{"from",id(ns[i-1])},{"to",id(ns[i])}});
-    } else if(op=="delete-node") {
+    } else if(op=="delete-node"||op=="delete-selection") {
         // Compose only compatible directed incidences through the removed node.
-        const auto uid=id(req.at("nodeId"));
-        for(const auto& a:records)if(a.at("to")==uid)for(const auto& b:records)if(b.at("from")==uid) {
+        auto deleted=req.value("nodeIds",json::array());if(req.contains("nodeId"))deleted.push_back(req["nodeId"]);
+        for(const auto& node:deleted){const auto uid=id(node);auto current=changed;
+        for(const auto& a:current)if(a.at("to")==uid)for(const auto& b:current)if(b.at("from")==uid) {
             auto left=a,right=b;left.erase("from");left.erase("to");right.erase("from");right.erase("to");
             if(left==right&&a.at("from")!=b.at("to")){auto r=a;r["to"]=b.at("to");changed.push_back(r);}
+        }
         }
     }
     json out=json::array();
