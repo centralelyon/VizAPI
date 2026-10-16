@@ -1,5 +1,6 @@
 """Local crossing elements, ordering and preview geometry (server only)."""
 from collections import defaultdict
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -377,9 +378,16 @@ def add_crossings(result,payload):
     if 'renderGeometries' not in result:return result
     state=result['state'];scale=result.get('spacingScale',1);edit=payload.get('crossingEdit')
     if edit and (edit.get('side') not in result['renderGeometries'] or edit.get('mode') not in ('styled','geometry')):raise ValueError('Invalid crossing window')
-    networks={}
+    networks={};scenes={}
     for side,scene in result['renderGeometries'].items():
         orders=state.setdefault('styles',{}).setdefault(side,{}).setdefault('crossingOrders',{})
+        # Cache only within this request: no stale revisions or cross-session data.
+        # Editing can change orders, so that path always runs independently.
+        scene_key=None if edit else json.dumps([scene.get(key) for key in ('routes','geometryRoutes','editNodeIds','sharedSegments')]+[orders],sort_keys=True,separators=(',',':'))
+        if scene_key is not None and scene_key in scenes:
+            cached,cached_orders=scenes[scene_key]
+            scene.update(cached);orders.update(deepcopy(cached_orders));scene['crossingOrders']=orders
+            continue
         geometry=scene.get('geometryRoutes',[])
         key=json.dumps(geometry,separators=(',',':'))
         if key not in networks:networks[key]=network_elements(geometry)
@@ -400,4 +408,5 @@ def add_crossings(result,payload):
                 edit if edit and edit['side']==side and edit['mode']==mode else None)
         crossing_details(scene,result.get('shape',state.get('shape',{})))
         scene['crossingOrders']=orders
+        if scene_key is not None:scenes[scene_key]=({key:scene[key] for key in ('styledCrossings','styledCrossingPaint','geometryCrossings','geometryCrossingPaint')},deepcopy(orders))
     return result

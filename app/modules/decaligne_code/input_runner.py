@@ -35,6 +35,8 @@ def inspect_input(files):
 def convert_input(files, route_ids=None):
     if route_ids and len(route_ids) > 500:
         raise ValueError("The existing edit engine supports at most 500 loaded routes. Select a smaller subset in the legend.")
+    if len(files) == 1 and files[0][0].lower().endswith((".json", ".geojson")):
+        return _validate_json(files[0][1])
     info = inspect_input(files)
     kind = info["type"]
     if kind == "json":

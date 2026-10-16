@@ -29,10 +29,11 @@ MAX_SESSIONS = 128
 
 
 def core_call(payload):
+    started = time.perf_counter()
     binary = os.environ.get("TRANSITMAP_CORE_BIN", "/usr/local/bin/transitmap-core")
     try:
         result = subprocess.run(
-            [binary], input=json.dumps(payload, allow_nan=False),
+            [binary], input=json.dumps(payload, allow_nan=False, separators=(",", ":")),
             text=True, capture_output=True, timeout=CORE_TIMEOUT, check=False,
         )
     except FileNotFoundError as exc:
@@ -48,7 +49,12 @@ def core_call(payload):
     if result.returncode != 0 or "error" in data:
         raise HTTPException(422, data.get("error", "TransitMap core failed."))
     try:
-        return add_crossings(data, payload)
+        geometry_done = time.perf_counter()
+        result = add_crossings(data, payload)
+        logger.info("TransitMap op=%s core=%.3fs crossings=%.3fs nodes=%d routes=%d",
+                    payload.get("op"), geometry_done-started, time.perf_counter()-geometry_done,
+                    len(data.get("shape", {}).get("nodes", [])), len(data.get("shape", {}).get("routes", [])))
+        return result
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -127,8 +133,11 @@ class EditSessions:
     def create(self, body):
         if not isinstance(body.get("map"), dict):
             raise HTTPException(422, "map must be a GeoJSON object")
-        result = self.core({"op": "session", **{k: body[k] for k in ("map", "obstacles", "styles", "style", "bidirectionalRoutes") if k in body}})
-        result["state"]["original"] = body["map"]
+        # UI-only metadata is already applied by the browser; do not copy it into
+        # every geometry subprocess and every undo checkpoint.
+        source = {k: v for k, v in body["map"].items() if k not in ("transitMapCanvasState", "transitMapStyle")}
+        result = self.core({"op": "session", **{k: body[k] for k in ("obstacles", "styles", "style", "bidirectionalRoutes", "deferRender") if k in body}, "map": source})
+        result["state"]["original"] = source
         sid = uuid.uuid4().hex
         checkpoint_id = uuid.uuid4().hex
         now = time.time()

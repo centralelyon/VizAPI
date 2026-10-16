@@ -1353,6 +1353,9 @@ json transitCoreRequest(const json& request) {
         if(st.contains("visibleRouteIds")){json ids=json::array();for(const auto& id:st["visibleRouteIds"])if(id==it.key()){for(const auto& child:it.value())ids.push_back(child["id"]);}else ids.push_back(id);st["visibleRouteIds"]=ids;}
     }
     state["styles"]=styles;json scenes=json::object();
+    // The browser supplies route-specific styles after receiving topology.
+    // Avoid an unused full render with default widths during session creation.
+    if(op=="session"&&request.value("deferRender",false))return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"obstacles",json::array()},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"spacingScale",1}};
     Shape renderShape;StyledShape renderCanonical;json renderTopology;
     if(!enabled.empty()) {
         renderShape=directionalRenderShape(shape,state.at("directionalData"),state["bidirectionalRoutes"]);
@@ -1497,11 +1500,15 @@ json transitCoreRequest(const json& request) {
         scene["geometryRoutes"]=rendered(visible,plain,cam,visibleTopology)["routes"];
         return scene;
     };
+    std::map<std::string,json> sceneCache;
     for(auto it=styles.begin();it!=styles.end();++it) {
         // Discard styles for deleted routes/pairs as part of topology updates.
         auto st=it.value(); auto pairs=st.value("pairs",json::array());json retained=json::array();
         for(const auto& pair:pairs)if(std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==pair.at("a");})&&std::any_of(shape.routes.begin(),shape.routes.end(),[&](const auto& r){return r.id==pair.at("b");}))retained.push_back(pair);
-        st["pairs"]=retained;scenes[it.key()]=sceneFor(st);
+        st["pairs"]=retained;
+        const auto key=st.dump();auto cached=sceneCache.find(key);
+        if(cached==sceneCache.end())cached=sceneCache.emplace(key,sceneFor(st)).first;
+        scenes[it.key()]=cached->second;
     }
     if(scenes.empty())scenes["right"]=sceneFor(json::object());
     for(auto it=scenes.begin();it!=scenes.end();++it)it.value()["features"]=featureCommands(state,styles.value(it.key(),json::object()),cam);
