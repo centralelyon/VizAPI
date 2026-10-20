@@ -29,7 +29,7 @@ def endpoint(operation):
 
 
 OPERATIONS = (
-    "session", "evaluation", "upload", "move-node", "delete-node", "add-station", "merge-stations",
+    "session", "evaluation", "upload", "save-version", "move-node", "delete-node", "add-station", "merge-stations",
     "split-station", "split-segment", "delete-segment", "delete-selection", "trim-route", "select-nearby-nodes", "add-route", "append-map", "delete-route", "update-routes",
     "draw-route", "draw-line-feature", "draw-region-feature",
     "move-region-feature", "scale-region-feature", "reshape-region-feature", "delete-region-feature", "apply-regions", "move-background-image",

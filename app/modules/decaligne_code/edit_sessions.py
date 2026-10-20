@@ -136,6 +136,7 @@ class EditSessions:
         # UI-only metadata is already applied by the browser; do not copy it into
         # every geometry subprocess and every undo checkpoint.
         source = {k: v for k, v in body["map"].items() if k not in ("transitMapCanvasState", "transitMapStyle")}
+        source["transitMapMapId"] = storage.map_identity(source)
         result = self.core({"op": "session", **{k: body[k] for k in ("obstacles", "styles", "style", "bidirectionalRoutes", "deferRender") if k in body}, "map": source})
         result["state"]["original"] = source
         sid = uuid.uuid4().hex
@@ -398,6 +399,19 @@ class EditSessions:
             return result
 
     def _apply(self, operation, body):
+        if operation == "save-version":
+            sid, revision, state = self.read(body)
+            source_version = body.get("sourceVersionId")
+            if source_version:
+                directory = storage.version_directory(body.get("participantId"), source_version)
+                _, state = storage.version_state(str(directory))
+            exported = self.core({"op": "export", "state": state})
+            with self.connect() as conn:
+                exported["map"]["transitMapComments"] = (storage.version_state(str(directory))[0].get("transitMapComments", {"version": 1, "coordinateSystem": "map-world", "items": [], "nextIndex": 1})
+                    if source_version else map_comments.exported(conn, sid, state))
+            exported["map"]["transitMapMapId"] = storage.map_identity(state["original"])
+            return {"sessionId": sid, "revision": revision,
+                    "version": storage.save_version(exported["map"], body, state)}
         if operation == "select-nearby-nodes":
             sid, revision, state = self.read(body)
             nodes = [n for n in state["shape"]["nodes"] if not n["isStation"]]
@@ -631,6 +645,7 @@ class EditSessions:
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)
         if operation == "export":
+            result["map"]["transitMapMapId"] = storage.map_identity(state["original"])
             with self.connect() as conn:
                 result["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
             # Export is a snapshot at the requested revision, not a mutation.
