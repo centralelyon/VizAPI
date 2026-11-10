@@ -183,3 +183,9 @@ module.router.include_router(storage_router)
 
 from app.modules.decaligne_code.background_image import router as background_router
 module.router.include_router(background_router)
+
+from app.modules.decaligne_code.tutorial import router as tutorial_router
+module.router.include_router(tutorial_router)
+
+from app.modules.decaligne_code.tutorial_lessons import router as tutorial_lessons_router
+module.router.include_router(tutorial_lessons_router)

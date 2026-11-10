@@ -4,6 +4,7 @@ SQLite compare-and-swap permits multiple VizAPI workers. Core/LOOM work runs
 outside the transaction; a concurrent writer wins at most once. Failed commands
 leave the persisted Shape, style, and revision unchanged.
 """
+from . import timeline, networks, transfers
 from contextlib import contextmanager
 import json
 import logging
@@ -19,7 +20,6 @@ import uuid
 from fastapi import HTTPException
 from app.modules.decaligne_code.crossing_geometry import add_crossings
 
-from app.modules.decaligne_code.loom_runner import run_octi
 from app.modules.decaligne_code import storage, evaluation, comments as map_comments
 
 MAX_BODY = 16 * 1024 * 1024
@@ -29,12 +29,15 @@ MAX_SESSIONS = 128
 
 
 def core_call(payload):
+    prepared = networks.prepare(payload)
+    if payload.get('op') == 'append-map': payload['map'] = prepared['map']
+    payload = prepared
     started = time.perf_counter()
     binary = os.environ.get("TRANSITMAP_CORE_BIN", "/usr/local/bin/transitmap-core")
     try:
         result = subprocess.run(
             [binary], input=json.dumps(payload, allow_nan=False, separators=(",", ":")),
-            text=True, capture_output=True, timeout=CORE_TIMEOUT, check=False,
+            text=True, capture_output=True, timeout=600 if payload.get("op") == "loom" else CORE_TIMEOUT, check=False,
         )
     except FileNotFoundError as exc:
         raise HTTPException(503, "TransitMap C++ core is not installed. Set TRANSITMAP_CORE_BIN.") from exc
@@ -50,7 +53,7 @@ def core_call(payload):
         raise HTTPException(422, data.get("error", "TransitMap core failed."))
     try:
         geometry_done = time.perf_counter()
-        result = add_crossings(data, payload)
+        result = networks.finish(add_crossings(data, payload), payload)
         logger.info("TransitMap op=%s core=%.3fs crossings=%.3fs nodes=%d routes=%d",
                     payload.get("op"), geometry_done-started, time.perf_counter()-geometry_done,
                     len(data.get("shape", {}).get("nodes", [])), len(data.get("shape", {}).get("routes", [])))
@@ -75,10 +78,9 @@ def geographic_map(source, state):
 
 
 class EditSessions:
-    def __init__(self, database=None, core=core_call, loom=run_octi):
+    def __init__(self, database=None, core=core_call):
         self.database = database
         self.core = core
-        self.loom = loom
 
     @contextmanager
     def connect(self):
@@ -137,7 +139,8 @@ class EditSessions:
         # every geometry subprocess and every undo checkpoint.
         source = {k: v for k, v in body["map"].items() if k not in ("transitMapCanvasState", "transitMapStyle")}
         source["transitMapMapId"] = storage.map_identity(source)
-        result = self.core({"op": "session", **{k: body[k] for k in ("obstacles", "styles", "style", "bidirectionalRoutes", "deferRender") if k in body}, "map": source})
+        result = self.core({"op": "session", **{k: body[k] for k in ("obstacles", "styles", "style", "bidirectionalRoutes", "deferRender", "inputName") if k in body}, "map": source})
+        source["transitMapNetworks"] = result["state"].get("transitNetworks", {})
         result["state"]["original"] = source
         sid = uuid.uuid4().hex
         checkpoint_id = uuid.uuid4().hex
@@ -264,6 +267,9 @@ class EditSessions:
                 except OSError as exc:
                     raise HTTPException(503, "Evaluation log could not be written") from exc
                 return {"logged": True, "sessionId": sid, "revision": revision}
+            if path is not None and body.get('uiEvents'):
+                _, event_revision, _ = self.read(body)
+                evaluation.append(path, participant, sid, event_revision, evaluation.ui_events({'events':body['uiEvents']}))
             needs_event = operation in evaluation.OPERATIONS or (operation == "render-geometry" and "bidirectionalRoutes" in body)
             history = body.get("historyAction") if operation == "checkout" else None
             if history is not None and history not in ("undo", "redo"):
@@ -399,6 +405,13 @@ class EditSessions:
             return result
 
     def _apply(self, operation, body):
+        if operation == "timeline":
+            if body.get("versionId"):
+                directory = storage.version_directory(body["participantId"], body["versionId"])
+                _, state = storage.version_state(str(directory))
+            else:
+                _, _, state = self.read(body)
+            return timeline.build(state, body["geometry"], body["mode"])
         if operation == "save-version":
             sid, revision, state = self.read(body)
             source_version = body.get("sourceVersionId")
@@ -409,6 +422,7 @@ class EditSessions:
             with self.connect() as conn:
                 exported["map"]["transitMapComments"] = (storage.version_state(str(directory))[0].get("transitMapComments", {"version": 1, "coordinateSystem": "map-world", "items": [], "nextIndex": 1})
                     if source_version else map_comments.exported(conn, sid, state))
+            timeline.preserve(exported["map"], state)
             exported["map"]["transitMapMapId"] = storage.map_identity(state["original"])
             return {"sessionId": sid, "revision": revision,
                     "version": storage.save_version(exported["map"], body, state)}
@@ -437,8 +451,8 @@ class EditSessions:
             return {"sessionId": sid, "revision": revision, "position": [x + bx - ax, y + by - ay]}
         if operation == "viewport-geometry":
             scale = body.get("spacingScale")
-            if type(scale) not in (int, float) or not math.isfinite(scale) or not 0.1 <= scale <= 5:
-                raise HTTPException(422, "spacingScale must be between 0.1 and 5")
+            if type(scale) not in (int, float) or not math.isfinite(scale) or not 0.1 <= scale <= 10000:
+                raise HTTPException(422, "spacingScale must be between 0.1 and 10000")
             sid, revision, state = self.read(body)
             result = self.core({"op": "render-geometry", "state": state, "spacingScale": scale})
             # Do not persist result.state, create checkpoints, or advance revision.
@@ -461,6 +475,7 @@ class EditSessions:
                 exported["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
             if body.get("canvasState") is not None:
                 exported["map"]["transitMapCanvasState"] = {"version": 1, **body["canvasState"]}
+            timeline.preserve(exported["map"], state)
             return storage.save_upload(
                 exported["map"],
                 body,
@@ -629,31 +644,33 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("fromNodeId", "toNodeId", "crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("priorityLevel", "beforeNodeId", "networkId", "cityName", "inputName", "fromNodeId", "toNodeId", "crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
+        if "stylesPatch" in body: payload["styles"] = transfers.apply(state.get("styles", {}), body["stylesPatch"])
         payload.update(op=operation, state=state)
-        if operation == "loom":
-            prepared = self.core({"op": "loom-export", "state": state})
-            try:
-                new_map = self.loom(prepared["map"])
-            except (OSError, RuntimeError) as exc:
-                raise HTTPException(502, str(exc)) from exc
-            # C++ loads the native optimizer result and restores background
-            # route metadata. No coordinate interpolation or graph replacement.
-            payload.update(op="loom-apply", map=new_map)
-        elif operation == "restore":
+        if operation == "restore":
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)
         if operation == "export":
+            timeline.preserve(result["map"], state)
             result["map"]["transitMapMapId"] = storage.map_identity(state["original"])
             with self.connect() as conn:
                 result["map"]["transitMapComments"] = map_comments.exported(conn, sid, state)
             # Export is a snapshot at the requested revision, not a mutation.
             return self.public(result, sid, revision)
         result["state"]["original"] = state["original"]
+        aliases = dict(state.get("timelineRouteSources", state["original"].get("transitMapTimetable", {}).get("routeSources", {})))
+        for old, children in result.get("routeReplacements", {}).items():
+            for child in children:
+                aliases[child["id"]] = aliases.get(old, old)
+        if aliases:
+            result["state"]["timelineRouteSources"] = aliases
         if operation == "append-map":
             # Keep Original network complete as more catalog routes are loaded.
+            body["map"] = payload["map"]
             original = result["state"]["original"]
+            original["transitMapNetworks"] = result["state"].get("transitNetworks", {})
+            timeline.merge(original, body["map"])
             points = {f["properties"]["id"] for f in original["features"] if f["geometry"]["type"] == "Point"}
             edges = {tuple(sorted((f["properties"]["from"], f["properties"]["to"]))): f for f in original["features"] if f["geometry"]["type"] == "LineString"}
             for feature in body["map"]["features"]:

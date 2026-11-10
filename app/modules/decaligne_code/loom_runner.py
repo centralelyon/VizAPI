@@ -1,32 +1,6 @@
-import json
-import subprocess
-
-
-OCTI_BIN = "/usr/local/bin/octi"
-OCTI_TIMEOUT_SECONDS = 600
-
-
+"""Compatibility entry point for the embedded C++ OCTI + LOOM pipeline."""
 def run_octi(graph):
-    try:
-        result = subprocess.run(
-            [OCTI_BIN],
-            input=json.dumps(graph),
-            text=True,
-            capture_output=True,
-            timeout=OCTI_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("OCTI timed out.") from exc
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"OCTI failed: {result.stderr[-3000:]}"
-        )
-
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "OCTI did not return valid JSON."
-        ) from exc
+    from .edit_sessions import core_call
+    session = core_call({"op": "session", "map": graph, "deferRender": True})
+    result = core_call({"op": "loom", "state": session["state"]})
+    return core_call({"op": "export", "state": result["state"]})["map"]

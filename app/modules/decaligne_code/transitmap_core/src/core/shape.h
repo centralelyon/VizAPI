@@ -72,7 +72,7 @@ public:
     // layer 1: route layer - Geometry
     std::vector<std::vector<std::vector<Point>>> routes_geometry_vertices;
     // Ordered topology from the same traversal used to construct geometry.
-    struct RoutePathTopology { std::vector<int> nodes, segments; };
+    struct RoutePathTopology { std::vector<int> nodes, segments, geometryNodes; };
     std::vector<std::vector<RoutePathTopology>> route_path_topology;
     //example
     //Route 0(path 0(point 0, point 1), path 1(point 2, point 3))
@@ -86,6 +86,7 @@ public:
         int pointIndexB = -1;
     };
     std::vector<std::vector<StyledRouteSegmentRef>> shared_indices;
+    std::unordered_map<int, std::unordered_map<int,int>> loomLaneRanks;
     //example:
     //shared 0 = (route 0(path 1(point 1, point 2)), route 1(path 1(point 5, point 6)), route 3(path 0(point 8, point 9)))
     //shared 1 = (route 0(path 2(point 2, point 3)), route 2(path 1(point 9, point 10)))

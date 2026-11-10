@@ -163,15 +163,18 @@ def preview_version(participant: str, version_id: str, body: dict):
     document, state = version_state(directory)
     if "styles" in body:
         scale = body.get("spacingScale", 1)
-        if type(scale) not in (int, float) or not 0.1 <= scale <= 5:
+        if type(scale) not in (int, float) or not 0.1 <= scale <= 10000:
             raise HTTPException(422, "Invalid zoom scale")
         return version_render(directory, json.dumps(body["styles"], sort_keys=True), scale)
     canvas = document["transitMapCanvas"]
     settings = document.get("transitMapCanvasState", {})
-    return {"shape": state["shape"], "canvas": canvas, "canvasState": settings,
+    from copy import deepcopy
+    from .networks import finish
+    snapshot = finish({"shape": deepcopy(state["shape"]), "state": deepcopy(state)}, {"state": state})
+    return {"shape": snapshot["shape"], "canvas": canvas, "canvasState": settings,
             "comments": document.get("transitMapComments", {}).get("items", []),
             "styleCss": document["transitMapStyle"]["css"],
-            "style": settings.get("edits", {}).get(f'{canvas["side"]}:{canvas.get("styleName", "")}'),
+            "style": settings.get("networkStylesBySide", {}).get(canvas["side"]) or settings.get("edits", {}).get(f'{canvas["side"]}:{canvas.get("styleName", "")}'),
             "version": document["transitMapVersion"]}
 
 

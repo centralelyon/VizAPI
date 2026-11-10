@@ -533,13 +533,17 @@ def _run_gtfs(path, selected_route_ids=None):
             "stop_times": ("trip_id", "stop_id", "stop_sequence", "shape_dist_traveled"),
             "shapes": ("shape_id", "shape_pt_lon", "shape_pt_lat", "shape_pt_sequence", "shape_dist_traveled"),
         }
+        from .timeline import read_tables, pack
         with zipfile.ZipFile(gtfs_input) as archive:
+            schedule_tables = read_tables(archive)
             tables = {
                 name: [{key: row.get(key, "") for key in keys}
-                       for row in _read_csv_from_zip(archive, name + ".txt")]
+                       for row in ([dict(zip(schedule_tables[name]["columns"], row)) for row in schedule_tables[name]["rows"]]
+                                   if name in schedule_tables else _read_csv_from_zip(archive, name + ".txt"))]
                 if name + ".txt" in archive.namelist() else []
                 for name, keys in columns.items()
             }
+        graph["transitMapTimetable"] = pack(schedule_tables)
         graph["transitMapDirections"] = core_call({
             "op": "gtfs-patterns", "tables": tables,
         })["directionalData"]

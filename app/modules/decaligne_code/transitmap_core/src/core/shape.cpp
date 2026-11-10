@@ -9,6 +9,7 @@
 
 #include "core/shape.h"
 #include "obs/region.h"
+#include <set>
 namespace {
     static constexpr double kSnapStep = 3.1415926535897932384 / 4.0;
 
@@ -1153,6 +1154,14 @@ StyledShape Shape2StyleShape(const Shape& shape) {
     //default90.radiusY = 12.0f;
     //styled.routes_bends.push_back(default90);
 
+    // Geometry can omit collinear topology nodes. Keep an explicit mapping
+    // for spacing constraints, and retain shared junctions when moving routes
+    // around fixed line features.
+    const bool hasLineFeature=std::any_of(shape.routes.begin(),shape.routes.end(),[](const auto& r){return r.isObstacle;});
+    std::unordered_map<int,std::set<std::string>> nodeRoutes;
+    if(hasLineFeature)for(const auto& r:shape.routes)for(int e:r.segmentIndices){
+        nodeRoutes[shape.segments[e].a].insert(r.id);nodeRoutes[shape.segments[e].b].insert(r.id);
+    }
     std::unordered_map<int, int> globalSegmentUseCount;
     for (const auto& route : shape.routes) {
         for (int segIndex : route.segmentIndices) {
@@ -1335,6 +1344,7 @@ StyledShape Shape2StyleShape(const Shape& shape) {
             if (!route.orderedNodes.empty()) return true;
             if (chainIndex <= 0 || chainIndex >= static_cast<int>(path.nodes.size()) - 1) return true;
             const int node = path.nodes[chainIndex];
+            if(hasLineFeature&&nodeRoutes[node].size()>1)return true;
             if (unconsumedDegree(node) > 0) return true;
             const int originalDegree = static_cast<int>(adjacency[node].size());
             if (originalDegree != 2) return true;
@@ -1386,7 +1396,9 @@ StyledShape Shape2StyleShape(const Shape& shape) {
             }
 
             styled.routes_geometry_vertices[ri].push_back(std::move(geometryPath));
-            styled.route_path_topology[ri].push_back({path.nodes, path.globalSegments});
+            std::vector<int> geometryNodes;
+            for(int chainPos:keptChainPositions)geometryNodes.push_back(path.nodes[chainPos]);
+            styled.route_path_topology[ri].push_back({path.nodes, path.globalSegments, std::move(geometryNodes)});
         }
 
     }

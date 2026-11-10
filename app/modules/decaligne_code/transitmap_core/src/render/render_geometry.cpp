@@ -1,8 +1,10 @@
+#include <climits>
 #include "render/render_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <unordered_map>
+#include <map>
 
 static Point normalizeP(Point p) { double l=std::hypot(p.x,p.y); return l>1e-12 ? Point{p.x/l,p.y/l} : Point{}; }
 static double dotP(Point a, Point b) { return a.x*b.x+a.y*b.y; }
@@ -275,6 +277,7 @@ namespace {
             bundleIndex < static_cast<int>(styledShape.shared_indices.size()); ++bundleIndex) {
             SpacingBundle bundle;
             for (const auto& reference : styledShape.shared_indices[bundleIndex]) {
+                if(reference.routeIndex>=0&&reference.routeIndex<int(styledShape.routes_is_obstacle.size())&&styledShape.routes_is_obstacle[reference.routeIndex])continue;
                 ValidSharedRef valid;
                 if (validateSharedRef(styledShape, canonicalScreenGeometry,
                     reference, bundleIndex, valid)) bundle.references.push_back(valid);
@@ -287,6 +290,13 @@ namespace {
             std::sort(bundle.routes.begin(), bundle.routes.end());
             bundle.routes.erase(std::unique(bundle.routes.begin(), bundle.routes.end()), bundle.routes.end());
             if (bundle.routes.size() < 2) continue;
+            auto loom = styledShape.loomLaneRanks.find(bundleIndex);
+            if (loom != styledShape.loomLaneRanks.end()) {
+                const auto& ranks = loom->second;
+                auto rank = [&](int route) { return ranks.count(route) ? ranks.at(route) : INT_MAX; };
+                std::stable_sort(bundle.routes.begin(), bundle.routes.end(),
+                    [&](int a, int b) { return rank(a) < rank(b); });
+            }
 
             double offset = 0.0;
             bundle.laneOffsets[bundle.routes.front()] = offset;
@@ -410,6 +420,161 @@ namespace {
         return displayGeometry;
     }
 
+    // River vertices stay fixed. Transit vertices move in the nullspace of
+    // segment-direction and junction constraints. Signed half-planes preserve
+    // crossings while clearance is measured between the two visible edges.
+    static DisplayGeometry applyRiverClearance(const StyledShape& s, const DisplayGeometry& base) {
+        struct Vertex { int route,path,point; };
+        struct Edge { int a,b,route; Point p,q,d,n; double length; };
+        std::vector<Vertex> vertices;std::vector<Edge> routes,rivers;
+        std::map<int,std::vector<int>> junctions;
+        for(size_t r=0;r<base.size();++r)for(size_t p=0;p<base[r].size();++p){
+            const auto& path=base[r][p];const bool river=r<s.routes_is_obstacle.size()&&s.routes_is_obstacle[r];
+            int start=vertices.size();
+            if(!river)for(size_t k=0;k<path.size();++k){
+                int v=vertices.size();vertices.push_back({int(r),int(p),int(k)});
+                if(r<s.route_path_topology.size()&&p<s.route_path_topology[r].size()&&k<s.route_path_topology[r][p].geometryNodes.size())
+                    junctions[s.route_path_topology[r][p].geometryNodes[k]].push_back(v);
+            }
+            for(size_t k=1;k<path.size();++k){Point delta=subP(path[k],path[k-1]);double length=lenP(delta);if(length<1e-7)continue;
+                Point d=mulP(delta,1/length);Edge edge{start+int(k)-1,start+int(k),int(r),path[k-1],path[k],d,{-d.y,d.x},length};
+                (river?rivers:routes).push_back(edge);
+            }
+        }
+        if(rivers.empty()||routes.empty())return base;
+        auto clearance=[&](const Edge& e,const Edge& river,double& a,double& b,double& spacing){
+            if(std::abs(crossP(e.d,river.d))>0.08715574275)return false;
+            a=dotP(subP(e.p,river.p),river.n);b=dotP(subP(e.q,river.p),river.n);
+            if(a*b<=0||std::abs(a+b)<2e-5)return false;
+            double u=dotP(subP(e.p,river.p),river.d),v=dotP(subP(e.q,river.p),river.d);
+            if(std::min(std::max(u,v),river.length)-std::max(std::min(u,v),0.0)<1e-5)return false;
+            spacingForRoutes(s,e.route,river.route,spacing);return spacing>0;
+        };
+        bool needsMovement=false;
+        for(const auto& e:routes){for(const auto& river:rivers){double a,b,spacing;
+            if(clearance(e,river,a,b,spacing)&&std::min(std::abs(a),std::abs(b))<spacing-1e-6){needsMovement=true;break;}}
+            if(needsMovement)break;
+        }
+        // A new line often has no nearby parallel transit segment. In
+        // particular, the unstyled geometry pass never needs clearance work.
+        if(!needsMovement)return base;
+        const int dimensions=2*vertices.size();using Row=std::vector<double>;
+        auto dot=[](const Row& a,const Row& b){double v=0;for(size_t i=0;i<a.size();++i)v+=a[i]*b[i];return v;};
+        struct BasisRow { std::vector<std::pair<int,double>> values;int first,last; };
+        std::vector<BasisRow> basis;
+        auto project=[&](Row& row){
+            int first=dimensions,last=-1;
+            for(int i=0;i<dimensions;++i)if(row[i]!=0){first=std::min(first,i);last=i;}
+            for(int pass=0;pass<2;++pass)for(const auto& q:basis){
+                if(q.last<first||q.first>last)continue;
+                double value=0;for(auto [i,v]:q.values)value+=row[i]*v;
+                if(std::abs(value)<1e-15)continue;
+                for(auto [i,v]:q.values)row[i]-=value*v;
+                first=std::min(first,q.first);last=std::max(last,q.last);
+            }
+        };
+        auto equality=[&](Row row){project(row);double length=std::sqrt(dot(row,row));
+            if(length<=1e-8)return;
+            BasisRow q{{},dimensions,-1};
+            for(int i=0;i<dimensions;++i)if(std::abs(row[i]/length)>1e-14){q.values.push_back({i,row[i]/length});q.first=std::min(q.first,i);q.last=i;}
+            basis.push_back(std::move(q));
+        };
+        for(const auto& e:routes){Row row(dimensions);row[2*e.a]=-e.n.x;row[2*e.a+1]=-e.n.y;row[2*e.b]=e.n.x;row[2*e.b+1]=e.n.y;equality(std::move(row));
+            // Translate short optimizer bend samples together, rather than
+            // stretching an already sub-pixel curve into a different shape.
+            if(e.length<2){Row tangent(dimensions);tangent[2*e.a]=-e.d.x;tangent[2*e.a+1]=-e.d.y;tangent[2*e.b]=e.d.x;tangent[2*e.b+1]=e.d.y;equality(std::move(tangent));}
+        }
+        for(const auto& item:junctions)for(size_t k=1;k<item.second.size();++k)for(int axis=0;axis<2;++axis){
+            Row row(dimensions);row[2*item.second[0]+axis]=1;row[2*item.second[k]+axis]=-1;equality(std::move(row));}
+        struct Constraint { std::vector<std::pair<int,double>> raw,row;double bound,norm=0,extra=0,lambda=0; };
+        std::vector<Constraint> constraints;
+        // Keep the sparse half-plane until movement actually reaches it. Most
+        // route/river pairs never constrain the solution; projecting every pair
+        // eagerly makes adding a line scale with the entire network.
+        auto inequality=[&](Row row,double bound,double extra=0){
+            Constraint c{{},{},bound,0,extra};
+            for(int i=0;i<dimensions;++i)if(row[i]!=0)c.raw.push_back({i,row[i]});
+            constraints.push_back(std::move(c));};
+        auto vertexSide=[&](int v,Point normal,double bound,double extra=0){Row row(dimensions);row[2*v]=normal.x;row[2*v+1]=normal.y;inequality(std::move(row),bound,extra);};
+        for(const auto& e:routes){Row row(dimensions);row[2*e.a]=-e.d.x;row[2*e.a+1]=-e.d.y;row[2*e.b]=e.d.x;row[2*e.b+1]=e.d.y;
+            inequality(std::move(row),-e.length*.99);
+            for(const auto& river:rivers){
+                double a=dotP(subP(e.p,river.p),river.n),b=dotP(subP(e.q,river.p),river.n);
+                double c=dotP(subP(river.p,e.p),e.n),d=dotP(subP(river.q,e.p),e.n);
+                const double eps=1e-5;
+                auto keepRiverSide=[&](double side){double sign=side<0?-1:1;vertexSide(e.a,mulP(river.n,sign),-sign*a*.99);vertexSide(e.b,mulP(river.n,sign),-sign*b*.99);};
+                auto keepRouteSide=[&](double side){double sign=side<0?-1:1;vertexSide(e.a,mulP(e.n,-sign),-std::min(sign*c,sign*d)*.99);};
+                if(a*b>0&&std::min(std::abs(a),std::abs(b))>eps)keepRiverSide(a);
+                else if(c*d>0&&std::min(std::abs(c),std::abs(d))>eps)keepRouteSide(c);
+                else {
+                    for(auto item:{std::pair<int,double>{e.a,a},{e.b,b}}){
+                        if(std::abs(item.second)>eps){double sign=item.second<0?-1:1;vertexSide(item.first,mulP(river.n,sign),-std::abs(item.second)*.99);}
+                        else {vertexSide(item.first,river.n,-eps);vertexSide(item.first,mulP(river.n,-1),-eps);}
+                    }
+                    for(double side:{c,d})if(std::abs(side)>eps){double sign=side<0?-1:1;vertexSide(e.a,mulP(e.n,-sign),-std::abs(side)*.99);}
+                }
+                // A hand-drawn river can deviate slightly from a parallel line.
+                // Crossing segments deliberately keep their original crossing.
+                double spacing=0;if(!clearance(e,river,a,b,spacing))continue;
+                double side=(a+b)*.5;if(std::abs(side)<eps)continue;
+                double sign=side<0?-1:1;
+                double widths=(s.routes_width[e.route]+s.routes_width[river.route])*.5;
+                double gap=std::max(0.0,spacing-widths);
+                vertexSide(e.a,mulP(river.n,sign),spacing-gap-sign*a,gap);
+                vertexSide(e.b,mulP(river.n,sign),spacing-gap-sign*b,gap);
+            }
+        }
+        auto solve=[&](double fraction,Row& delta){
+            delta.assign(dimensions,0);for(auto& c:constraints)c.lambda=0;
+            std::vector<size_t> active;std::vector<bool> included(constraints.size());
+            auto value=[&](const Constraint& c){double result=0;for(auto [i,v]:(c.row.empty()?c.raw:c.row))result+=v*delta[i];return result;};
+            // Most length/crossing constraints are already satisfied. Solve
+            // only violated rows, adding constraints when movement reaches them.
+            while(true){
+                bool added=false;
+                for(size_t i=0;i<constraints.size();++i)if(!included[i]){
+                    auto& c=constraints[i];
+                    // delta is in the direction/junction nullspace, so an
+                    // unprojected half-plane has the same value on delta.
+                    if(c.bound+fraction*c.extra-value(c)>1e-6){
+                        if(c.row.empty()){
+                            Row row(dimensions);for(auto [j,v]:c.raw)row[j]=v;
+                            project(row);c.norm=dot(row,row);
+                            if(c.norm<1e-14)continue;
+                            for(int j=0;j<dimensions;++j)if(std::abs(row[j])>1e-12)c.row.push_back({j,row[j]});
+                        }
+                        included[i]=true;active.push_back(i);added=true;
+                    }
+                }
+                if(!added)return true;
+                for(int iteration=0;iteration<4000;++iteration){double change=0;
+                    for(size_t index:active){auto& c=constraints[index];
+                        double next=std::max(0.0,c.lambda+(c.bound+fraction*c.extra-value(c))/c.norm),step=next-c.lambda;c.lambda=next;
+                        if(std::abs(step)<1e-12)continue;
+                        for(auto [i,v]:c.row)delta[i]+=step*v;
+                        change=std::max(change,std::abs(step)*std::sqrt(c.norm));
+                    }
+                    if(change<1e-7)break;
+                }
+                for(size_t index:active){const auto& c=constraints[index];
+                    if(c.bound+fraction*c.extra-value(c)>1e-6)return false;}
+            }
+        };
+        Row delta;
+        if(!solve(1,delta)){
+            // A fixed river and preserved crossing intervals can limit the
+            // available gap. Keep the largest feasible gap, never reverse a
+            // segment or change a crossing to satisfy an impossible request.
+            if(!solve(0,delta))return base;
+            double lo=0,hi=1;
+            for(int i=0;i<10;++i){double middle=(lo+hi)*.5;Row candidate;
+                if(solve(middle,candidate)){lo=middle;delta=std::move(candidate);}else hi=middle;}
+        }
+        DisplayGeometry result=base;
+        for(size_t i=0;i<vertices.size();++i){const auto& v=vertices[i];result[v.route][v.path][v.point]=addP(base[v.route][v.path][v.point],{delta[2*i],delta[2*i+1]});}
+        return result;
+    }
+
     struct CornerBend { bool matched = false; int style = -1; double rx = 0, ry = 0; Point in{}, out{}; };
     static void appendUnique(std::vector<Point>& out, Point p) { if (out.empty() || lenP(subP(out.back(), p)) > 1e-7) out.push_back(p); }
 
@@ -449,7 +614,7 @@ StyledShapeDisplayData buildStyledShapeDisplayData(
     StyledShapeDisplayData result;
     const auto canonicalScreenGeometry = buildCanonicalScreenGeometry(styledShape, camera);
     const auto spacingAdjustedGeometry =
-        buildSpacingAdjustedGeometry(styledShape, canonicalScreenGeometry);
+        applyRiverClearance(styledShape, buildSpacingAdjustedGeometry(styledShape, canonicalScreenGeometry));
     result.screenRoutePaths = spacingAdjustedGeometry;
     result.commands.resize(spacingAdjustedGeometry.size());
     for(size_t ri=0;ri<spacingAdjustedGeometry.size();++ri) {
@@ -465,9 +630,39 @@ StyledShapeDisplayData buildStyledShapeDisplayData(
         for (auto& path : route)
             for (Point& point : path)
                 point = camera.screenToWorld(point.x, point.y);
-    result.normalStations = updateNormalStations(styledShape, result.worldRoutePaths);
+    auto stationStyle=styledShape;
+    if(std::any_of(styledShape.routes_is_obstacle.begin(),styledShape.routes_is_obstacle.end(),[](bool value){return value;})) {
+        // Keep each station on its local segment when spacing changes lengths.
+        // A fraction of the entire route would slide it along other segments.
+        auto nearest=[](const std::vector<Point>& path,Point p,double preferred,int& segment,double& t){
+            double best=1e100,bestVisit=1e100,total=0,before=0;segment=0;t=0;
+            for(size_t i=1;i<path.size();++i)total+=lenP(subP(path[i],path[i-1]));
+            for(size_t i=1;i<path.size();++i){Point d=subP(path[i],path[i-1]);double length=lenP(d);
+                double u=length>0?clampD(dotP(subP(p,path[i-1]),d)/(length*length),0,1):0;
+                double distance=lenP(subP(p,addP(path[i-1],mulP(d,u))));
+                double visit=std::abs(before+u*length-preferred*total);
+                if(distance<best-1e-7||(std::abs(distance-best)<1e-7&&visit<bestVisit)){best=distance;bestVisit=visit;segment=i-1;t=u;}
+                before+=length;
+            }
+        };
+        auto remap=[&](int r,int p,float& pathT){
+            if(r<0||r>=int(canonicalScreenGeometry.size())||p<0||p>=int(canonicalScreenGeometry[r].size()))return;
+            const auto& original=canonicalScreenGeometry[r][p];if(original.size()<2)return;
+            double total=0,before=0;for(size_t i=1;i<original.size();++i)total+=lenP(subP(original[i],original[i-1]));
+            double distance=clampD(pathT,0,1)*total,t=0;int segment=0;
+            for(size_t i=1;i<original.size();++i){double length=lenP(subP(original[i],original[i-1]));
+                if(distance<=before+length||i+1==original.size()){segment=i-1;t=length>0?clampD((distance-before)/length,0,1):0;break;}before+=length;}
+            const auto& adjusted=spacingAdjustedGeometry[r][p];Point target=addP(adjusted[segment],mulP(subP(adjusted[segment+1],adjusted[segment]),t));
+            const double preferred=relativeArcLengthAtSegment(adjusted,segment,t);
+            const auto& finalPath=result.screenRoutePaths[r][p];nearest(finalPath,target,preferred,segment,t);
+            pathT=relativeArcLengthAtSegment(finalPath,segment,t);
+        };
+        for(auto& station:stationStyle.normal_stations)remap(station.routeIndex,station.pathIndex,station.pathT);
+        for(auto& station:stationStyle.transfer_stations)for(auto& position:station.positions)remap(position.routeIndex,position.pathIndex,position.pathT);
+    }
+    result.normalStations = updateNormalStations(stationStyle, result.worldRoutePaths);
     result.transferStations = updateTransferStations(
-        styledShape, result.worldRoutePaths,
+        stationStyle, result.worldRoutePaths,
         kStationMergeEpsilonPixels * symbolScale / std::max(camera.getScale(), kStyledEps));
     return result;
 }

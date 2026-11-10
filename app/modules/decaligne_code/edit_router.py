@@ -1,4 +1,7 @@
 import json
+import gzip
+from starlette.responses import Response
+from . import transfers
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from app.modules.decaligne_code import comments as map_comments
@@ -23,13 +26,18 @@ def endpoint(operation):
                 raise ValueError("Expected an object")
         except (ValueError, UnicodeDecodeError) as exc:
             raise HTTPException(400, "Expected a valid JSON object") from exc
-        return await run_in_threadpool(sessions.apply, operation, body)
+        result = await run_in_threadpool(sessions.apply, operation, body)
+        result = await run_in_threadpool(transfers.response, body, result)
+        contents = json.dumps(result, separators=(',', ':'), ensure_ascii=False).encode()
+        if len(contents)>2048 and 'gzip' in request.headers.get('accept-encoding', ''):
+            return Response(gzip.compress(contents, compresslevel=3), media_type='application/json', headers={'Content-Encoding':'gzip','Vary':'Accept-Encoding'})
+        return Response(contents, media_type='application/json')
     handle.__name__ = "edit_" + operation.replace("-", "_")
     return handle
 
 
 OPERATIONS = (
-    "session", "evaluation", "upload", "save-version", "move-node", "delete-node", "add-station", "merge-stations",
+    "station-priorities", "timeline", "session", "evaluation", "upload", "save-version", "move-node", "delete-node", "add-station", "merge-stations",
     "split-station", "split-segment", "delete-segment", "delete-selection", "trim-route", "select-nearby-nodes", "add-route", "append-map", "delete-route", "update-routes",
     "draw-route", "draw-line-feature", "draw-region-feature",
     "move-region-feature", "scale-region-feature", "reshape-region-feature", "delete-region-feature", "apply-regions", "move-background-image",
@@ -72,3 +80,22 @@ async def comments(request: Request):
     body = await request.json()
     return await run_in_threadpool(map_comments.operate, sessions, body)
 
+
+@router.post("/edit/style-preview", include_in_schema=False)
+async def style_preview(request: Request):
+    from app.modules.decaligne_code.style_preview import preview
+    return preview(await request.json())
+
+
+@router.post('/edit/osm-tiles', include_in_schema=False)
+async def osm_tiles(request: Request):
+    from .osm_tiles import layout
+    return layout(await request.json())
+
+
+@router.post('/edit/style-previews', include_in_schema=False)
+async def style_previews(request: Request):
+    from .style_preview import preview
+    body = await request.json()
+    if len(body['items'])>128: raise HTTPException(422, 'Too many previews')
+    return [preview(item) for item in body['items']]

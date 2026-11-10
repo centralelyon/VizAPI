@@ -1,0 +1,2055 @@
+{
+  "type": "FeatureCollection",
+  "description": "Lyon ABCD tutorial: real WGS84 station locations; straight links connect consecutive stations. No OCTI layout or pre-drawn features.",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-0",
+        "station_id": "A-0",
+        "station_label": "Perrache",
+        "sourceStopIds": [
+          30101,
+          30459
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.826951215,
+          45.749782345
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-1",
+        "station_id": "A-1",
+        "station_label": "Ampère–Victor Hugo",
+        "sourceStopIds": [
+          42745,
+          46049
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.829212845,
+          45.753114895
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-1",
+        "from": "A-0",
+        "to": "A-1",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.826951215,
+            45.749782345
+          ],
+          [
+            4.829212845,
+            45.753114895
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-2",
+        "station_id": "A-2",
+        "station_label": "Bellecour",
+        "sourceStopIds": [
+          30201,
+          30202,
+          30103,
+          46051
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.83346707,
+          45.757117765
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-2",
+        "from": "A-1",
+        "to": "A-2",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.829212845,
+            45.753114895
+          ],
+          [
+            4.83346707,
+            45.757117765
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-3",
+        "station_id": "A-3",
+        "station_label": "Cordeliers",
+        "sourceStopIds": [
+          42744,
+          46050
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.835812795,
+          45.76344913
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-3",
+        "from": "A-2",
+        "to": "A-3",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.83346707,
+            45.757117765
+          ],
+          [
+            4.835812795,
+            45.76344913
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-4",
+        "station_id": "A-4",
+        "station_label": "Hôtel de Ville–Louis Pradel",
+        "sourceStopIds": [
+          42743,
+          46052
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.83604008,
+          45.76731893
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-4",
+        "from": "A-3",
+        "to": "A-4",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.835812795,
+            45.76344913
+          ],
+          [
+            4.83604008,
+            45.76731893
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-5",
+        "station_id": "A-5",
+        "station_label": "Foch",
+        "sourceStopIds": [
+          42742,
+          46053
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.844477830000001,
+          45.76876656
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-5",
+        "from": "A-4",
+        "to": "A-5",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.83604008,
+            45.76731893
+          ],
+          [
+            4.844477830000001,
+            45.76876656
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-6",
+        "station_id": "A-6",
+        "station_label": "Masséna",
+        "sourceStopIds": [
+          42741,
+          46054
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.85337111,
+          45.76958444
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-6",
+        "from": "A-5",
+        "to": "A-6",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.844477830000001,
+            45.76876656
+          ],
+          [
+            4.85337111,
+            45.76958444
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-7",
+        "station_id": "A-7",
+        "station_label": "Charpennes–Charles Hernu",
+        "sourceStopIds": [
+          42740,
+          30472,
+          46055
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.863779453333334,
+          45.770449469999996
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-7",
+        "from": "A-6",
+        "to": "A-7",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.85337111,
+            45.76958444
+          ],
+          [
+            4.863779453333334,
+            45.770449469999996
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-8",
+        "station_id": "A-8",
+        "station_label": "République–Villeurbanne",
+        "sourceStopIds": [
+          46056,
+          42739
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.873671105,
+          45.77060860500001
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-8",
+        "from": "A-7",
+        "to": "A-8",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.863779453333334,
+            45.770449469999996
+          ],
+          [
+            4.873671105,
+            45.77060860500001
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-9",
+        "station_id": "A-9",
+        "station_label": "Gratte-Ciel",
+        "sourceStopIds": [
+          46057,
+          42738
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.88218402,
+          45.76903613
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-9",
+        "from": "A-8",
+        "to": "A-9",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.873671105,
+            45.77060860500001
+          ],
+          [
+            4.88218402,
+            45.76903613
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-10",
+        "station_id": "A-10",
+        "station_label": "Flachet–Alain Gilles",
+        "sourceStopIds": [
+          46058,
+          42737
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.89004921,
+          45.767589529999995
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-10",
+        "from": "A-9",
+        "to": "A-10",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.88218402,
+            45.76903613
+          ],
+          [
+            4.89004921,
+            45.767589529999995
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-11",
+        "station_id": "A-11",
+        "station_label": "Cusset",
+        "sourceStopIds": [
+          46059,
+          42736
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.900275645,
+          45.765708485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-11",
+        "from": "A-10",
+        "to": "A-11",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.89004921,
+            45.767589529999995
+          ],
+          [
+            4.900275645,
+            45.765708485
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-12",
+        "station_id": "A-12",
+        "station_label": "Laurent Bonnevay–Astroballe",
+        "sourceStopIds": [
+          46060,
+          46061
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.90949776,
+          45.763981565
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-12",
+        "from": "A-11",
+        "to": "A-12",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.900275645,
+            45.765708485
+          ],
+          [
+            4.90949776,
+            45.763981565
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-13",
+        "station_id": "A-13",
+        "station_label": "Vaulx-en-Velin–La Soie",
+        "sourceStopIds": [
+          36394,
+          36434
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.921070025000001,
+          45.76097528
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "A-edge-13",
+        "from": "A-12",
+        "to": "A-13",
+        "lines": [
+          {
+            "id": "A",
+            "label": "A",
+            "name": "A",
+            "color": "df4086"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.90949776,
+            45.763981565
+          ],
+          [
+            4.921070025000001,
+            45.76097528
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-1",
+        "station_id": "B-1",
+        "station_label": "Brotteaux",
+        "sourceStopIds": [
+          46022,
+          46023
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.859428455,
+          45.766890925
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-1",
+        "from": "A-7",
+        "to": "B-1",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.863779453333334,
+            45.770449469999996
+          ],
+          [
+            4.859428455,
+            45.766890925
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-2",
+        "station_id": "B-2",
+        "station_label": "Gare Part-Dieu–Vivier Merle",
+        "sourceStopIds": [
+          46024,
+          46025
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.85724503,
+          45.76162467
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-2",
+        "from": "B-1",
+        "to": "B-2",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.859428455,
+            45.766890925
+          ],
+          [
+            4.85724503,
+            45.76162467
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-3",
+        "station_id": "B-3",
+        "station_label": "Place Guichard–Bourse du Travail",
+        "sourceStopIds": [
+          46026,
+          46027
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.84760767,
+          45.759401255
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-3",
+        "from": "B-2",
+        "to": "B-3",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.85724503,
+            45.76162467
+          ],
+          [
+            4.84760767,
+            45.759401255
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-4",
+        "station_id": "B-4",
+        "station_label": "Saxe–Gambetta",
+        "sourceStopIds": [
+          30133,
+          30197,
+          30198,
+          46040
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8470069725,
+          45.753776125
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-4",
+        "from": "B-3",
+        "to": "B-4",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.84760767,
+            45.759401255
+          ],
+          [
+            4.8470069725,
+            45.753776125
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-5",
+        "station_id": "B-5",
+        "station_label": "Jean Macé",
+        "sourceStopIds": [
+          46028,
+          46029
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8424144,
+          45.746177405
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-5",
+        "from": "B-4",
+        "to": "B-5",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8470069725,
+            45.753776125
+          ],
+          [
+            4.8424144,
+            45.746177405
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-6",
+        "station_id": "B-6",
+        "station_label": "Place Jean Jaurès",
+        "sourceStopIds": [
+          46030,
+          31663
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8374911350000005,
+          45.737850394999995
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-6",
+        "from": "B-5",
+        "to": "B-6",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8424144,
+            45.746177405
+          ],
+          [
+            4.8374911350000005,
+            45.737850394999995
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-7",
+        "station_id": "B-7",
+        "station_label": "Debourg",
+        "sourceStopIds": [
+          46031,
+          46032
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.833970965000001,
+          45.731945625
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-7",
+        "from": "B-6",
+        "to": "B-7",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8374911350000005,
+            45.737850394999995
+          ],
+          [
+            4.833970965000001,
+            45.731945625
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-8",
+        "station_id": "B-8",
+        "station_label": "Stade de Gerland–Le LOU",
+        "sourceStopIds": [
+          46033,
+          46034
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.831271275000001,
+          45.72739706
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-8",
+        "from": "B-7",
+        "to": "B-8",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.833970965000001,
+            45.731945625
+          ],
+          [
+            4.831271275000001,
+            45.72739706
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-9",
+        "station_id": "B-9",
+        "station_label": "Gare d’Oullins",
+        "sourceStopIds": [
+          46036,
+          46035
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8145057950000005,
+          45.716692644999995
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-9",
+        "from": "B-8",
+        "to": "B-9",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.831271275000001,
+            45.72739706
+          ],
+          [
+            4.8145057950000005,
+            45.716692644999995
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-10",
+        "station_id": "B-10",
+        "station_label": "Oullins Centre",
+        "sourceStopIds": [
+          48136,
+          48137
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.80541325,
+          45.71435821
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-10",
+        "from": "B-9",
+        "to": "B-10",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8145057950000005,
+            45.716692644999995
+          ],
+          [
+            4.80541325,
+            45.71435821
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-0",
+        "station_id": "C-0",
+        "station_label": "Hôtel de Ville–Louis Pradel",
+        "sourceStopIds": [
+          30156
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.83595222,
+          45.76813941
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-1",
+        "station_id": "C-1",
+        "station_label": "Croix-Paquet",
+        "sourceStopIds": [
+          10787,
+          10788
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.836238359999999,
+          45.77094337
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-edge-1",
+        "from": "C-0",
+        "to": "C-1",
+        "lines": [
+          {
+            "id": "C",
+            "label": "C",
+            "name": "C",
+            "color": "f5ad28"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.83595222,
+            45.76813941
+          ],
+          [
+            4.836238359999999,
+            45.77094337
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-2",
+        "station_id": "C-2",
+        "station_label": "Croix-Rousse",
+        "sourceStopIds": [
+          643,
+          644
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.831823905,
+          45.77453029
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-edge-2",
+        "from": "C-1",
+        "to": "C-2",
+        "lines": [
+          {
+            "id": "C",
+            "label": "C",
+            "name": "C",
+            "color": "f5ad28"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.836238359999999,
+            45.77094337
+          ],
+          [
+            4.831823905,
+            45.77453029
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-3",
+        "station_id": "C-3",
+        "station_label": "Hénon",
+        "sourceStopIds": [
+          30158,
+          30157
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.827520615,
+          45.779266175000004
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-edge-3",
+        "from": "C-2",
+        "to": "C-3",
+        "lines": [
+          {
+            "id": "C",
+            "label": "C",
+            "name": "C",
+            "color": "f5ad28"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.831823905,
+            45.77453029
+          ],
+          [
+            4.827520615,
+            45.779266175000004
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-4",
+        "station_id": "C-4",
+        "station_label": "Cuire",
+        "sourceStopIds": [
+          30159
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8324983,
+          45.78525777
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "C-edge-4",
+        "from": "C-3",
+        "to": "C-4",
+        "lines": [
+          {
+            "id": "C",
+            "label": "C",
+            "name": "C",
+            "color": "f5ad28"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.827520615,
+            45.779266175000004
+          ],
+          [
+            4.8324983,
+            45.78525777
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-0",
+        "station_id": "D-0",
+        "station_label": "Gare de Vaise",
+        "sourceStopIds": [
+          30209,
+          30210
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8037947899999995,
+          45.779798295
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-1",
+        "station_id": "D-1",
+        "station_label": "Valmy",
+        "sourceStopIds": [
+          30207,
+          30208
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.80542811,
+          45.774779905
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-1",
+        "from": "D-0",
+        "to": "D-1",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8037947899999995,
+            45.779798295
+          ],
+          [
+            4.80542811,
+            45.774779905
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-2",
+        "station_id": "D-2",
+        "station_label": "Gorge de Loup",
+        "sourceStopIds": [
+          30205,
+          30206
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8054919,
+          45.766429895
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-2",
+        "from": "D-1",
+        "to": "D-2",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.80542811,
+            45.774779905
+          ],
+          [
+            4.8054919,
+            45.766429895
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-3",
+        "station_id": "D-3",
+        "station_label": "Vieux Lyon–Cathédrale Saint-Jean",
+        "sourceStopIds": [
+          33265,
+          33264
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.82651235,
+          45.760096255
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-3",
+        "from": "D-2",
+        "to": "D-3",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8054919,
+            45.766429895
+          ],
+          [
+            4.82651235,
+            45.760096255
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-4",
+        "from": "D-3",
+        "to": "A-2",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.82651235,
+            45.760096255
+          ],
+          [
+            4.83346707,
+            45.757117765
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-5",
+        "station_id": "D-5",
+        "station_label": "Guillotière–Gabriel Péri",
+        "sourceStopIds": [
+          30199,
+          30200
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.842553045,
+          45.755442055
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-5",
+        "from": "A-2",
+        "to": "D-5",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.83346707,
+            45.757117765
+          ],
+          [
+            4.842553045,
+            45.755442055
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-6",
+        "from": "D-5",
+        "to": "B-4",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.842553045,
+            45.755442055
+          ],
+          [
+            4.8470069725,
+            45.753776125
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-7",
+        "station_id": "D-7",
+        "station_label": "Garibaldi",
+        "sourceStopIds": [
+          30445,
+          30446
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.854206534999999,
+          45.75142613
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-7",
+        "from": "B-4",
+        "to": "D-7",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8470069725,
+            45.753776125
+          ],
+          [
+            4.854206534999999,
+            45.75142613
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-8",
+        "station_id": "D-8",
+        "station_label": "Sans Souci",
+        "sourceStopIds": [
+          30193,
+          30194
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.864823510000001,
+          45.747769535
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-8",
+        "from": "D-7",
+        "to": "D-8",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.854206534999999,
+            45.75142613
+          ],
+          [
+            4.864823510000001,
+            45.747769535
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-9",
+        "station_id": "D-9",
+        "station_label": "Monplaisir–Lumière",
+        "sourceStopIds": [
+          30191,
+          30192
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.871833905000001,
+          45.745357395
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-9",
+        "from": "D-8",
+        "to": "D-9",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.864823510000001,
+            45.747769535
+          ],
+          [
+            4.871833905000001,
+            45.745357395
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-10",
+        "station_id": "D-10",
+        "station_label": "Grange Blanche",
+        "sourceStopIds": [
+          30189,
+          30190
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.878945399999999,
+          45.742891075
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-10",
+        "from": "D-9",
+        "to": "D-10",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.871833905000001,
+            45.745357395
+          ],
+          [
+            4.878945399999999,
+            45.742891075
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-11",
+        "station_id": "D-11",
+        "station_label": "Laënnec",
+        "sourceStopIds": [
+          30187,
+          30188
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.886296435,
+          45.738692375
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-11",
+        "from": "D-10",
+        "to": "D-11",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.878945399999999,
+            45.742891075
+          ],
+          [
+            4.886296435,
+            45.738692375
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-12",
+        "station_id": "D-12",
+        "station_label": "Mermoz–Pinel",
+        "sourceStopIds": [
+          30185,
+          30186
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8872479,
+          45.730482855000005
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-12",
+        "from": "D-11",
+        "to": "D-12",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.886296435,
+            45.738692375
+          ],
+          [
+            4.8872479,
+            45.730482855000005
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-13",
+        "station_id": "D-13",
+        "station_label": "Parilly",
+        "sourceStopIds": [
+          30184,
+          30183
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.8874543599999996,
+          45.719763715
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-13",
+        "from": "D-12",
+        "to": "D-13",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8872479,
+            45.730482855000005
+          ],
+          [
+            4.8874543599999996,
+            45.719763715
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-14",
+        "station_id": "D-14",
+        "station_label": "Gare de Vénissieux",
+        "sourceStopIds": [
+          30447,
+          30448
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.888020815,
+          45.70558568
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "D-edge-14",
+        "from": "D-13",
+        "to": "D-14",
+        "lines": [
+          {
+            "id": "D",
+            "label": "D",
+            "name": "D",
+            "color": "2eaa65"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.8874543599999996,
+            45.719763715
+          ],
+          [
+            4.888020815,
+            45.70558568
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-11",
+        "station_id": "B-11",
+        "station_label": "Saint-Genis-Laval–Hôpital Sud",
+        "sourceStopIds": [
+          48138
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          4.80467104,
+          45.70121228
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "B-edge-11",
+        "from": "B-10",
+        "to": "B-11",
+        "lines": [
+          {
+            "id": "B",
+            "label": "B",
+            "name": "B",
+            "color": "49a6dd"
+          }
+        ]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            4.80541325,
+            45.71435821
+          ],
+          [
+            4.80467104,
+            45.70121228
+          ]
+        ]
+      }
+    }
+  ],
+  "transitMapObstacles": {
+    "type": "FeatureCollection",
+    "features": []
+  },
+  "source": {
+    "producer": "SYTRAL Mobilités / Métropole de Lyon",
+    "dataset": "Points d’arrêt du réseau Transports en Commun Lyonnais",
+    "url": "https://data.grandlyon.com/geoserver/sytral/ows?SERVICE=WFS&VERSION=2.0.0&request=GetFeature&typename=sytral:tcl_sytral.tclarret&outputFormat=application/json&SRSNAME=EPSG:4326",
+    "licence": "Licence Ouverte / Open Licence 2.0",
+    "retrieved": "2026-11-03",
+    "method": "Station position is the mean of published platform positions serving its routes; Hôtel de Ville A and C are kept separate for the merge exercise."
+  }
+}

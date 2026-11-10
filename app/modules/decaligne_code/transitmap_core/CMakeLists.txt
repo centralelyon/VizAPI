@@ -5,6 +5,8 @@ project(TransitMapCore)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_subdirectory(external/loom)
+
 add_library(TransitMapCore
     src/core/geometry.cpp
     src/core/shape.cpp
@@ -37,6 +39,8 @@ target_compile_definitions(
     PRIVATE
         TRANSIT_HEADLESS=1
 )
+
+target_link_libraries(TransitMapCore PRIVATE transitmap_loom)
 
 add_executable(
     transitmap-core
