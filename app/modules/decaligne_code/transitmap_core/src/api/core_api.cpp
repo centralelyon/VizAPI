@@ -281,7 +281,7 @@ json mapCoordinates(json geometry, const Camera* camera, bool planar) {
 }
 // Remove redundant samples along degree-two chains, preserving stations,
 // junctions and membership changes. Allow for GeoJSON projection round-off.
-void simplifyLayoutChains(Shape& shape) {
+void simplifyLayoutChains(Shape& shape, const std::set<std::string>& protectedNodes = {}) {
     if(shape.nodes.empty())return;
     std::vector<std::vector<int>> adjacent(shape.nodes.size());
     std::vector<std::set<int>> members(shape.segments.size());
@@ -291,7 +291,7 @@ void simplifyLayoutChains(Shape& shape) {
     std::vector<bool> anchor(shape.nodes.size());
     for(size_t n=0;n<shape.nodes.size();++n){auto p=shape.nodes[n].pos;
         lo.x=std::min(lo.x,p.x);lo.y=std::min(lo.y,p.y);hi.x=std::max(hi.x,p.x);hi.y=std::max(hi.y,p.y);
-        anchor[n]=isStationLike(shape.nodes[n].type)||adjacent[n].size()!=2;
+        anchor[n]=protectedNodes.count(shape.nodes[n].uid)||isStationLike(shape.nodes[n].type)||adjacent[n].size()!=2;
         if(!anchor[n])anchor[n]=members[adjacent[n][0]]!=members[adjacent[n][1]];
     }
     const double tolerance=std::max(1e-4,std::hypot(hi.x-lo.x,hi.y-lo.y)*1e-8);
@@ -930,7 +930,23 @@ Shape applyNativeLayout(json& state,json output) {
         for (const auto& r : p["lines"]) line.routes.push_back(identifier(r["id"]));
         if (line.routes.size() > 1) orderedLines.push_back(std::move(line));
     }
-    // Preserve every upstream geometry sample; do not reconstruct sharp corners.
+    // Keep lane-order boundaries, and leave networks outside the composite untouched.
+    std::set<std::string> anchors;
+    for (const auto& line : orderedLines) {
+        anchors.insert(line.nodes.front());
+        anchors.insert(line.nodes.back());
+    }
+    const auto networks = state.value("transitNetworks", json::object());
+    const auto members = networks.value("composite", json::object()).value("members", std::set<std::string>{});
+    if (!members.empty()) {
+        const auto owners = networks.value("routes", json::object());
+        for (const auto& route : next.routes) if (!members.count(owners.value(route.id, std::string("default"))))
+            for (int e : route.segmentIndices) {
+                anchors.insert(next.nodes[next.segments[e].a].uid);
+                anchors.insert(next.nodes[next.segments[e].b].uid);
+            }
+    }
+    simplifyLayoutChains(next, anchors);
     state["nativeGeometry"] = true;
     std::set<std::string> kept;
     for (const auto& n : next.nodes) kept.insert(n.uid);
