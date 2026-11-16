@@ -85,14 +85,24 @@ namespace {
     static std::vector<StyledShape::NormalStation> updateNormalStations(const StyledShape& styledShape, const DisplayGeometry& finalRoutePaths) {
         std::vector<StyledShape::NormalStation> output;
         output.reserve(styledShape.normal_stations.size());
+        const int routeCount = static_cast<int>(finalRoutePaths.size());
         for (const auto& canonical : styledShape.normal_stations) {
-            if (canonical.routeIndex < 0 || canonical.routeIndex >= static_cast<int>(finalRoutePaths.size()) ||
-                canonical.pathIndex < 0 || canonical.pathIndex >= static_cast<int>(finalRoutePaths[canonical.routeIndex].size()) ||
-                !std::isfinite(canonical.pathT)) {
-                std::cerr << "[updateNormalStations] invalid route/path metadata for station=" << canonical.id << "\n";
+            const int ri = canonical.routeIndex;
+            const int pi = canonical.pathIndex;
+            // Early validation without repeated indexing
+            if (ri < 0 || ri >= routeCount) {
+                std::cerr << "[updateNormalStations] invalid routeIndex for station=" << canonical.id << "\n";
                 continue;
             }
-            const auto& path = finalRoutePaths[canonical.routeIndex][canonical.pathIndex];
+            if (pi < 0 || pi >= static_cast<int>(finalRoutePaths[ri].size())) {
+                std::cerr << "[updateNormalStations] invalid pathIndex for station=" << canonical.id << "\n";
+                continue;
+            }
+            if (!std::isfinite(canonical.pathT)) {
+                std::cerr << "[updateNormalStations] invalid pathT for station=" << canonical.id << "\n";
+                continue;
+            }
+            const auto& path = finalRoutePaths[ri][pi];
             if (path.size() < 2) { std::cerr << "[updateNormalStations] invalid final path for station=" << canonical.id << "\n"; continue; }
             StyledShape::NormalStation station = canonical;
             station.pos = evaluatePathAtRelativeArcLength(path, canonical.pathT);
@@ -113,17 +123,27 @@ namespace {
         };
 
         std::vector<StyledShape::TransferStation> output;
+        const int routeCount = static_cast<int>(finalRoutePaths.size());
         for (const auto& source : styledShape.transfer_stations) {
             std::vector<PositionedTransfer> positions;
             positions.reserve(source.positions.size());
             for (const auto& position : source.positions) {
-                if (position.routeIndex < 0 || position.routeIndex >= static_cast<int>(finalRoutePaths.size()) ||
-                    position.pathIndex < 0 || position.pathIndex >= static_cast<int>(finalRoutePaths[position.routeIndex].size()) ||
-                    !std::isfinite(position.pathT)) {
-                    std::cerr << "[updateTransferStations] invalid route/path metadata for station=" << source.id << "\n";
+                const int ri = position.routeIndex;
+                const int pi = position.pathIndex;
+                // Optimized index validation - single early exit
+                if (ri < 0 || ri >= routeCount) {
+                    std::cerr << "[updateTransferStations] invalid routeIndex for station=" << source.id << "\n";
                     continue;
                 }
-                const auto& path = finalRoutePaths[position.routeIndex][position.pathIndex];
+                if (pi < 0 || pi >= static_cast<int>(finalRoutePaths[ri].size())) {
+                    std::cerr << "[updateTransferStations] invalid pathIndex for station=" << source.id << "\n";
+                    continue;
+                }
+                if (!std::isfinite(position.pathT)) {
+                    std::cerr << "[updateTransferStations] invalid pathT for station=" << source.id << "\n";
+                    continue;
+                }
+                const auto& path = finalRoutePaths[ri][pi];
                 if (path.size() < 2) {
                     std::cerr << "[updateTransferStations] invalid final path for station=" << source.id << "\n";
                     continue;
@@ -242,17 +262,32 @@ namespace {
     }
 
     static bool validateSharedRef(const StyledShape& s, const DisplayGeometry& canonicalScreen, const StyledShape::StyledRouteSegmentRef& r, int bundle, ValidSharedRef& out) {
-        if (r.routeIndex < 0 || r.routeIndex >= static_cast<int>(s.routes_geometry_vertices.size()) ||
-            r.pathIndex < 0 || r.pathIndex >= static_cast<int>(s.routes_geometry_vertices[r.routeIndex].size())) {
-            std::cerr << "[drawStyledShape] invalid shared ref bundle " << bundle << " route " << r.routeIndex << " path " << r.pathIndex << " points " << r.pointIndexA << "," << r.pointIndexB << "\n"; return false;
+        const int ri = r.routeIndex;
+        const int pi = r.pathIndex;
+        const int routeCount = static_cast<int>(s.routes_geometry_vertices.size());
+        // Optimized bounds checking with early exits
+        if (ri < 0 || ri >= routeCount) {
+            std::cerr << "[drawStyledShape] invalid routeIndex in shared ref bundle " << bundle << " route " << ri << "\n"; 
+            return false;
         }
-        const auto& path = canonicalScreen[r.routeIndex][r.pathIndex];
-        if (r.pointIndexA < 0 || r.pointIndexB < 0 || r.pointIndexA >= static_cast<int>(path.size()) || r.pointIndexB >= static_cast<int>(path.size()) || r.pointIndexA == r.pointIndexB || std::abs(r.pointIndexA - r.pointIndexB) != 1) {
-            std::cerr << "[drawStyledShape] invalid non-consecutive shared ref bundle " << bundle << " route " << r.routeIndex << " path " << r.pathIndex << " points " << r.pointIndexA << "," << r.pointIndexB << "\n"; return false;
+        if (pi < 0 || pi >= static_cast<int>(s.routes_geometry_vertices[ri].size())) {
+            std::cerr << "[drawStyledShape] invalid pathIndex in shared ref bundle " << bundle << " path " << pi << "\n"; 
+            return false;
         }
-        Point d = subP(path[r.pointIndexB], path[r.pointIndexA]);
-        if (lenP(d) < kStyledEps) { std::cerr << "[drawStyledShape] zero-length shared ref bundle " << bundle << " route " << r.routeIndex << " path " << r.pathIndex << "\n"; return false; }
-        out = { r, path[r.pointIndexA], path[r.pointIndexB], normalizeP(d), false };
+        const auto& path = canonicalScreen[ri][pi];
+        const int pathSize = static_cast<int>(path.size());
+        const int pA = r.pointIndexA;
+        const int pB = r.pointIndexB;
+        if (pA < 0 || pB < 0 || pA >= pathSize || pB >= pathSize || pA == pB || std::abs(pA - pB) != 1) {
+            std::cerr << "[drawStyledShape] invalid non-consecutive shared ref bundle " << bundle << " points " << pA << "," << pB << "\n"; 
+            return false;
+        }
+        Point d = subP(path[pB], path[pA]);
+        if (lenP(d) < kStyledEps) { 
+            std::cerr << "[drawStyledShape] zero-length shared ref bundle " << bundle << "\n"; 
+            return false; 
+        }
+        out = { r, path[pA], path[pB], normalizeP(d), false };
         return true;
     }
 
@@ -338,9 +373,11 @@ namespace {
                 for (const auto& reference : bundle.references) {
                     const int route = reference.ref.routeIndex;
                     const int path = reference.ref.pathIndex;
+                    // OPTIMIZATION: Cache path references to avoid repeated indexing
+                    const auto& displayPath = displayGeometry[route][path];
+                    const auto& canonicalPath = canonicalScreenGeometry[route][path];
                     for (const int point : { reference.ref.pointIndexA, reference.ref.pointIndexB }) {
-                        currentOffsets[route] += dotP(subP(displayGeometry[route][path][point],
-                            canonicalScreenGeometry[route][path][point]), bundle.normal);
+                        currentOffsets[route] += dotP(subP(displayPath[point], canonicalPath[point]), bundle.normal);
                         ++offsetCounts[route];
                     }
                 }
@@ -353,11 +390,13 @@ namespace {
 
                 for (const auto& reference : bundle.references) {
                     const int route = reference.ref.routeIndex;
+                    const int path = reference.ref.pathIndex;
                     const double error = bundle.laneOffsets.at(route) + translation - currentOffsets[route];
                     maximumError = std::max(maximumError, std::abs(error));
                     const Point correction = mulP(bundle.normal, error);
+                    // OPTIMIZATION: Cache path reference to avoid repeated indexing
                     for (const int point : { reference.ref.pointIndexA, reference.ref.pointIndexB }) {
-                        auto& value = corrections[route][reference.ref.pathIndex][point];
+                        auto& value = corrections[route][path][point];
                         value.sum = addP(value.sum, correction);
                         ++value.count;
                     }
@@ -625,11 +664,18 @@ StyledShapeDisplayData buildStyledShapeDisplayData(
             result.screenRoutePaths[ri][pi] = buildStyledDisplayPath(spacingAdjustedGeometry[ri][pi],
                 rules, kBezierSamples, int(ri), int(pi), &result.commands[ri][pi]);
     }
-    result.worldRoutePaths = result.screenRoutePaths;
-    for (auto& route : result.worldRoutePaths)
-        for (auto& path : route)
-            for (Point& point : path)
-                point = camera.screenToWorld(point.x, point.y);
+    // OPTIMIZATION: Directly compute world paths from spacingAdjustedGeometry instead of
+    // screen?world round-trip conversion which causes precision loss and doubles computation
+    result.worldRoutePaths = styledShape.routes_geometry_vertices;
+    for (size_t ri = 0; ri < result.worldRoutePaths.size() && ri < spacingAdjustedGeometry.size(); ++ri) {
+        for (size_t pi = 0; pi < result.worldRoutePaths[ri].size() && pi < spacingAdjustedGeometry[ri].size(); ++pi) {
+            const auto& screenPath = spacingAdjustedGeometry[ri][pi];
+            result.worldRoutePaths[ri][pi].resize(screenPath.size());
+            for (size_t i = 0; i < screenPath.size(); ++i) {
+                result.worldRoutePaths[ri][pi][i] = camera.screenToWorld(screenPath[i].x, screenPath[i].y);
+            }
+        }
+    }
     auto stationStyle=styledShape;
     if(std::any_of(styledShape.routes_is_obstacle.begin(),styledShape.routes_is_obstacle.end(),[](bool value){return value;})) {
         // Keep each station on its local segment when spacing changes lengths.

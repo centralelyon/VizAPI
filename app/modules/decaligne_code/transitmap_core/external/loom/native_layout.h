@@ -1,4 +1,4 @@
 #pragma once
 #include <string>
-// GeoJSON in/out; direct C++ library calls, no process or HTTP invocation.
-std::string nativeOctiLayout(const std::string& graph);
+// GeoJSON in/out; uses upstream OctiMain.cpp::drawComp, no HTTP or child process.
+std::string nativeOctiLayout(const std::string& graph, bool planarize = true);

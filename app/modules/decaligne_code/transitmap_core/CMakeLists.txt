@@ -17,6 +17,7 @@ add_library(TransitMapCore
     src/render/style.cpp
 
     src/api/core_api.cpp
+    src/mega/layout.cpp
 
     src/obs/region.cpp
     src/obs/line.cpp

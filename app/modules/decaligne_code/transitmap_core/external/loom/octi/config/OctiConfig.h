@@ -32,6 +32,8 @@ struct Config {
   std::string ilpPath;
   bool fromDot = false;
   bool deg2Heur = true;
+  // Application adapter only; upstream CLI keeps its default contraction.
+  bool preserveShortEdges = false;
   bool restrLocSearch = false;
   double enfGeoPen = 0;
   bool ilpNoSolve = false;

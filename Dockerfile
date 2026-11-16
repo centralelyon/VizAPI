@@ -51,6 +51,13 @@ ENV TRANSITMAP_CORE_BIN=/usr/local/bin/transitmap-core
 RUN sed -i 's/\r$//' /vizapi/app/modules/decaligne_code/init_data.sh \
     && chmod +x /vizapi/app/modules/decaligne_code/init_data.sh
 
+# Build graphViz - by Mu
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends graphviz \
+    && command -v neato \
+    && command -v gvpack \
+    && rm -rf /var/lib/apt/lists/*
+
 # this is wrong
 # COPY data data/ 
 

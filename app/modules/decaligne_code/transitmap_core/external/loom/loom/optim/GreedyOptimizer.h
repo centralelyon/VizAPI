@@ -8,6 +8,7 @@
 #include <map>
 #include "loom/config/LoomConfig.h"
 #include "loom/optim/ExhaustiveOptimizer.h"
+#include "loom/optim/ILPEdgeOrderOptimizer.h"
 #include "loom/optim/NullOptimizer.h"
 #include "loom/optim/OptGraph.h"
 #include "loom/optim/OptGraphScorer.h"

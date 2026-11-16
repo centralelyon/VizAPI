@@ -4,7 +4,7 @@ SQLite compare-and-swap permits multiple VizAPI workers. Core/LOOM work runs
 outside the transaction; a concurrent writer wins at most once. Failed commands
 leave the persisted Shape, style, and revision unchanged.
 """
-from . import timeline, networks, transfers
+from . import timeline, networks, transfers, mega_layout
 from contextlib import contextmanager
 import json
 import logging
@@ -644,13 +644,29 @@ class EditSessions:
                 raise HTTPException(409, "Session changed while closing")
             return {"sessionId": sid, "revision": revision, "closed": True}
             
-        allowed = ("priorityLevel", "beforeNodeId", "networkId", "cityName", "inputName", "fromNodeId", "toNodeId", "crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
+        allowed = ("members", "method", "kind", "rotate", "priorityLevel", "beforeNodeId", "networkId", "cityName", "inputName", "fromNodeId", "toNodeId", "crossingEdit", "spacingScale", "map", "wheelEvents", "viewport", "deltaMode", "preset", "center", "size", "wheelDelta", "edgeIndex", "vertexIndex", "featureId", "from", "to", "nodeId", "nodeIds", "segmentId", "segmentIds", "routeId", "routeIds", "routes", "x", "y", "snap", "orthogonal", "axis", "name", "stationId", "offset", "styles", "style", "bidirectionalRoutes", "points", "pickRadius", "color", "width")
         payload = {k: body[k] for k in allowed if k in body}
         if "stylesPatch" in body: payload["styles"] = transfers.apply(state.get("styles", {}), body["stylesPatch"])
         payload.update(op=operation, state=state)
+        if operation in ("mega-layout", "mega-remove"):
+            try:
+                if operation == "mega-layout": mega_layout.optimize(state, body)
+                else: mega_layout.remove(state,body.get('containerId'))
+            except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+            payload["op"] = "render-geometry"
         if operation == "restore":
             payload.update(op="replace-map", map=state["original"], obstacles=state["obstacles"])
         result = self.core(payload)
+        if state.get("transitNetworks",{}).get("composite") and operation in ("move-node","add-station","merge-stations","split-station","draw-route","add-route","apply-regions"):
+            try: mega_layout.validate_edit(result["state"])
+            except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+        if operation == "loom" and state.get("transitNetworks", {}).get("composite"):
+            new_state=result["state"]
+            try: mega_layout.optimize(new_state, {}, after_octi=True, before=state)
+            except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+            result=self.core({"op":"render-geometry","state":new_state})
         if operation == "export":
             timeline.preserve(result["map"], state)
             result["map"]["transitMapMapId"] = storage.map_identity(state["original"])

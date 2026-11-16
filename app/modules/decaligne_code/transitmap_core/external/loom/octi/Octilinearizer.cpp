@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <thread>
+#include "ilp/ILPGridOptimizer.h"
 #include "octi/Octilinearizer.h"
 #include "octi/basegraph/BaseGraph.h"
 #include "octi/basegraph/ConvexHullOctiGridGraph.h"
@@ -31,6 +32,7 @@ using combgraph::EdgeOrdering;
 using octi::basegraph::BaseGraph;
 using octi::combgraph::Drawing;
 using octi::config::OrderMethod;
+using octi::ilp::ILPStats;
 using util::geo::DBox;
 using util::geo::dist;
 using util::geo::DPoint;
@@ -42,6 +44,79 @@ using util::graph::BiDijkstra;
 using util::graph::Dijkstra;
 
 using util::DEBUG;
+
+// _____________________________________________________________________________
+Score Octilinearizer::drawILP(
+    const CombGraph& cg, const util::geo::DBox& box, LineGraph* outTg,
+    BaseGraph** retGg, Drawing* dOut, const Penalties& pens, double gridSize,
+    double borderRad, double maxGrDist, OrderMethod orderMethod, bool noSolve,
+    double enfGeoPen, size_t hananIters, int timeLim,
+    const std::string& cacheDir, double cacheThreshold, int numThreads,
+    octi::ilp::ILPStats* stats, const std::string& solverStr,
+    const std::string& path) {
+  BaseGraph* gg;
+  Drawing drawing;
+
+  // always set density penality to 0, cannot by used in ILP and prevents proper
+  // presolve by our approximate approach
+  Penalties pensCpy = pens;
+  pensCpy.densityPen = 0;
+
+  LOGTO(DEBUG, std::cerr) << "Presolving...";
+  try {
+    // presolve using heuristical approach to get a first feasible solution
+    LineGraph tmpOutTg;
+    // important: always use restrLocSearch here!
+    auto score = draw(cg, box, &tmpOutTg, &gg, &drawing, pensCpy, gridSize,
+                      borderRad, maxGrDist, orderMethod, true, enfGeoPen,
+                      hananIters, {}, 100, std::numeric_limits<size_t>::max());
+    if (score.violations) throw NoEmbeddingFoundExc();
+    LOGTO(DEBUG, std::cerr) << "Presolving finished.";
+  } catch (const NoEmbeddingFoundExc& exc) {
+    LOGTO(DEBUG, std::cerr) << "Presolve was not successful.";
+    gg = newBaseGraph(box, cg, gridSize, borderRad, hananIters, pensCpy);
+    gg->init();
+    drawing = Drawing(gg);
+  }
+
+  GeoPensMap enfGeoPens;
+  const GeoPensMap* geoPens = 0;
+
+  if (enfGeoPen) {
+    auto edges = getOrdering(cg, OrderMethod::NUM_LINES);
+    LOGTO(DEBUG, std::cerr) << "Writing geopens for " << edges.size() << " edges";
+    T_START(geopens);
+    for (auto cmbEdg : edges) {
+      gg->writeGeoCoursePens(cmbEdg, &enfGeoPens, enfGeoPen);
+    }
+    LOGTO(DEBUG, std::cerr) << "Done. (" << T_STOP(geopens) << "ms)";
+    geoPens = &enfGeoPens;
+  }
+
+  // TODO
+  // if (obstacles.size()) {
+  // std::cerr << "Writing obstacles... ";
+  // T_START(obstacles);
+  // for (auto gg : ggs) for (const auto& obst : obstacles)
+  // gg->addObstacle(obst);
+  // std::cerr << " done (" << T_STOP(obstacles) << "ms)" << std::endl;
+  // }
+
+  ilp::ILPGridOptimizer ilpoptim;
+
+  *stats =
+      ilpoptim.optimize(gg, cg, &drawing, maxGrDist, noSolve, geoPens, timeLim,
+                        cacheDir, cacheThreshold, numThreads, solverStr, path);
+
+  drawing.getLineGraph(outTg);
+  *retGg = gg;
+  *dOut = drawing;
+
+  Score a;
+  a.full = stats->score;
+
+  return a;
+}
 
 // _____________________________________________________________________________
 Score Octilinearizer::draw(const CombGraph& cg, const DBox& box,

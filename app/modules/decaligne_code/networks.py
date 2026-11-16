@@ -184,11 +184,20 @@ def prepare(payload):
     owners = {n['id']: {meta['routes'].get(r) for r in n.get('routeIds', [])} - {None} for n in state.get('shape', {}).get('nodes', [])}
     if op == 'merge-stations':
         groups = set().union(*(owners.get(n, set()) for n in payload.get('nodeIds', [])))
-        if len(groups) > 1: raise HTTPException(422, 'Stations from different cities cannot be merged')
+        if len(groups) > 1 and not groups.issubset(set(meta.get('composite',{}).get('members',[]))): raise HTTPException(422, 'Stations from different cities cannot be merged')
+    original_picks=payload.get('nodeIds',[])
     if op == 'draw-route' and city:
         payload['nodeIds'] = [n if not owners.get(n) or city in owners[n] else None for n in payload.get('nodeIds', [])]
         payload['cityNodeIds'] = [n for n, groups in owners.items() if city in groups]
         payload['citySegmentIds'] = [e['id'] for e in state['shape']['segments'] if any(meta['routes'].get(r)==city for r in e.get('routeIds', []))]
+    composite=meta.get('composite')
+    if composite and op=='draw-route' and city in composite['members']:
+        # Only explicitly picked member stations may become junctions.
+        picks=original_picks
+        allowed={n for n in picks if owners.get(n,set()).intersection(composite['members'])}
+        payload['nodeIds']=[n if n in allowed else None for n in original_picks]
+        payload['cityNodeIds']=list(allowed)
+        payload['citySegmentIds']=[]
     if state.get('shape') and meta['cities'] and payload.get('op')=='render-geometry':
         chosen = detail.selection(state['shape'], meta, payload.get('spacingScale', 1))
         payload['detailRouteIds'] = sorted(chosen['routes'])
@@ -267,4 +276,16 @@ def finish(result, payload):
         xs=[n['position'][0] for n in shape['nodes']];ys=[n['position'][1] for n in shape['nodes']]
         w=max(1200,(max(xs)-min(xs))*1.15,(max(ys)-min(ys))*1.15*1.5)
         result['fitView']={'x':(min(xs)+max(xs)-w)/2,'y':(min(ys)+max(ys)-w/1.5)/2,'w':w,'h':w/1.5}
+    presentation = result.pop('megaPresentation', {})
+    if 'containers' in presentation:
+        result['containers'] = presentation['containers']
+    if 'composite' in presentation:
+        composite = presentation['composite']
+        result['composite'] = composite
+        result['fitView'] = presentation['fitView']
+        for city in cities:
+            if city['id'] in composite['members']:
+                city['compositeId'] = composite['id']
+        for scene in result.get('renderGeometries', {}).values():
+            scene['compositeBoundary'] = composite['boundary']
     return result

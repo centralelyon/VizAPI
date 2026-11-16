@@ -1,4 +1,6 @@
 #include "../../external/loom/native_layout.h"
+#include "mega/packing.h"
+#include "mega/layout.h"
 #include "api/core_api.h"
 #include "core/shape.h"
 #include "core/projection.h"
@@ -389,9 +391,9 @@ Shape loadMap(json map) {
     }
     // GTFS topo already defines connectivity with from/to. Re-snapping its
     // samples to nearby stations can create links absent from that topology.
-    if(hasRouteDirections(map)||map.contains("transitMapDirections")||map.contains("transitMapCanvasState")) {
+    if(map.value("transitMapNativeGeometry",false)||map.value("transitMapNetworks",json::object()).contains("composite")||hasRouteDirections(map)||map.contains("transitMapDirections")||map.contains("transitMapCanvasState")) {
         auto shape=loadDirectedTopology(map);
-        if(map.contains("transitMapCanvasState")&&!hasRouteDirections(map)&&!map.contains("transitMapDirections"))simplifyLayoutChains(shape);
+        if(!map.value("transitMapNativeGeometry",false)&&!map.value("transitMapNetworks",json::object()).contains("composite")&&map.contains("transitMapCanvasState")&&!hasRouteDirections(map)&&!map.contains("transitMapDirections"))simplifyLayoutChains(shape);
         return shape;
     }
     auto loaderMap=map;
@@ -798,8 +800,8 @@ Shape integrateFeatures(Shape shape,json& state) {
     state["transform"]=transform;syncFeatureGeometry(result,state);return result;
 }
 
-// Follow the desktop RUN pipeline: regular Shape exporter -> unmodified OCTI
-// -> regular loader. Only semantic/style metadata is restored on the result.
+// Upstream pipeline: Shape exporter -> LOOM line ordering -> OCTI geometry.
+// The adapter restores application identities and style metadata.
 json nativeLayoutInput(const Shape& shape) {
     auto graph=shapeToLoomGeoJson(shape,true);
     std::vector<std::set<std::string>> membership(shape.nodes.size());std::vector<bool> feature(shape.nodes.size(),false);
@@ -821,9 +823,24 @@ json nativeLayoutInput(const Shape& shape) {
 json allNetworksLayout(const Shape& shape, const json& state) {
     const auto owners = state.value("transitNetworks", json::object()).value("routes", json::object());
     std::map<std::string, Shape> networks;
+    const auto composite = state.value("transitNetworks",json::object()).value("composite",json::object());
+    const auto members = composite.value("members",std::set<std::string>{});
+    std::vector<int> parent(shape.nodes.size());
+    for(size_t i=0;i<parent.size();++i) parent[i]=i;
+    auto root=[&](int i){while(i!=parent[i]){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+    for(const auto& e:shape.segments) parent[root(e.a)]=root(e.b);
     for (const auto& route : shape.routes) {
-        auto& network = networks[owners.value(route.id, std::string("default"))];
-        network.routes.push_back(route);
+        const auto owner=owners.value(route.id,std::string("default"));
+        if(members.empty() || !members.count(owner)) {
+            networks[(members.empty()?"":"keep:")+owner].routes.push_back(route);
+            continue;
+        }
+        std::map<int,std::vector<int>> parts;
+        for(int e:route.segmentIndices) parts[root(shape.segments[e].a)].push_back(e);
+        for(auto& part:parts){
+            auto piece=route;piece.segmentIndices=std::move(part.second);
+            networks["part:"+std::to_string(part.first)].routes.push_back(std::move(piece));
+        }
     }
     json result = {{"type", "FeatureCollection"}, {"features", json::array()}};
     size_t index = 0;
@@ -841,7 +858,11 @@ json allNetworksLayout(const Shape& shape, const json& state) {
             return f["geometry"]["type"] == "Point" && !used.count(f["properties"]["id"]);
         }), features.end());
         if (used.empty()) continue;
-        auto output = json::parse(nativeOctiLayout(input.dump()));
+        if(!members.empty() && entry.first.rfind("keep:",0)==0) {
+            for(auto& f:features)result["features"].push_back(std::move(f));
+            continue;
+        }
+        auto output = json::parse(nativeOctiLayout(input.dump(), members.empty()));
         // Upstream serializes pointer-based IDs; scope them to this network.
         const auto prefix = "octi_" + std::to_string(index++) + "_";
         std::map<std::string, std::string> oldStations, nodeIds;
@@ -893,8 +914,7 @@ Shape applyNativeLayout(json& state,json output) {
     std::vector<bool> transit(next.nodes.size(),false),feature(next.nodes.size(),false);
     for(const auto& route:next.routes)for(int e:route.segmentIndices)for(int n:{next.segments[e].a,next.segments[e].b})(route.isObstacle?feature:transit)[n]=true;
     for(size_t i=0;i<next.nodes.size();++i)if(feature[i]&&!transit[i]){next.nodes[i].type=ShapeNodeType::ShapePoint;next.nodes[i].name.clear();next.nodes[i].station_id.clear();}
-    // Remember LOOM's lane permutation along each output polyline before
-    // simplification removes its intermediate vertices.
+    // Preserve LOOM's lane permutation on every output polyline sample.
     struct OrderedLine { std::vector<std::string> nodes, routes; };
     std::vector<OrderedLine> orderedLines;
     size_t edge = 0;
@@ -910,7 +930,8 @@ Shape applyNativeLayout(json& state,json output) {
         for (const auto& r : p["lines"]) line.routes.push_back(identifier(r["id"]));
         if (line.routes.size() > 1) orderedLines.push_back(std::move(line));
     }
-    simplifyLayoutChains(next);
+    // Preserve every upstream geometry sample; do not reconstruct sharp corners.
+    state["nativeGeometry"] = true;
     std::set<std::string> kept;
     for (const auto& n : next.nodes) kept.insert(n.uid);
     json orders = json::object();
@@ -1370,6 +1391,8 @@ void edit(Shape& s, const std::string& op, const json& req, const Camera& cam) {
 }
 json transitCoreRequest(const json& request) {
     const auto op=request.value("op",std::string("session"));
+    if(op=="mega-pack")return mega::pack(request);
+    if(op=="mega-layout"||op=="mega-remove"||op=="mega-validate")return mega::layoutRequest(request);
     if(op=="gtfs-patterns")return {{"directionalData",gtfsDirectionalPatterns(request.at("tables"))}};
     json state=request.value("state",json::object()),routeReplacements=json::object(); std::set<std::string> affectedRoutes; Shape shape;
     if(op=="session" || op=="replace-map") {
@@ -1397,6 +1420,7 @@ json transitCoreRequest(const json& request) {
         cam.fitToData(data);auto center=cam.screenToWorld(600,400);
         state["transform"]={{"x",center.x},{"y",center.y},{"scale",cam.getScale()}};
         if(map.contains("transitMapTransform")){const auto& t=map["transitMapTransform"];state["transform"]={{"x",number(t,"x",0,-1e12,1e12)},{"y",number(t,"y",0,-1e12,1e12)},{"scale",number(t,"scale",1,1e-12,1e12)}};}
+        state["nativeGeometry"]=map.value("transitMapNativeGeometry",false);
         state.erase("loomOrder");
         if (map.contains("transitMapLineOrder")) state["loomOrder"] = map["transitMapLineOrder"];
         state["planar"]=map.value("coordinateSystem",std::string("auto"))=="planar";
@@ -1430,6 +1454,7 @@ json transitCoreRequest(const json& request) {
             exportRouteDirections(graph,state.value("routeTraversals",json::array()));
         }
         if (state.contains("loomOrder")) graph["transitMapLineOrder"] = state["loomOrder"];
+        if (state.value("nativeGeometry",false)) graph["transitMapNativeGeometry"] = true;
         graph["bidirectionalRoutes"]=state["bidirectionalRoutes"];graph["transitMapTransform"]=state["transform"];graph["transitMapObstacles"]=state["obstacles"]; return {{"map",graph},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
     }
     if(op=="append-map") {
@@ -1559,6 +1584,19 @@ json transitCoreRequest(const json& request) {
     state["bidirectionalRoutes"]=enabled;
     auto canonical=Shape2StyleShape(shape);
     auto topology=encode(shape,cam,canonical,state);state["shape"]=topology;
+    // Composite connectivity must include routes created by this request before
+    // producing its summary. The transport adapter uses the same ownership rules.
+    if(state.value("transitNetworks",json::object()).contains("composite")) {
+        auto& meta=state["transitNetworks"];
+        const auto fallback=request.value("networkId",meta["cities"].empty()?std::string():meta["cities"][0]["id"].get<std::string>());
+        for(auto it=routeReplacements.begin();it!=routeReplacements.end();++it)
+            for(const auto& child:it.value())meta["routes"][child["id"].get<std::string>()]=meta["routes"].value(it.key(),fallback);
+        for(const auto& feature:state["obstacles"].value("features",json::array())) {
+            const auto props=feature.value("properties",json::object());
+            if(props.contains("topologyRouteId"))meta["routes"][props["topologyRouteId"].get<std::string>()]=props.value("networkId",fallback);
+        }
+        for(const auto& route:topology["routes"])if(!meta["routes"].contains(route["id"].get<std::string>()))meta["routes"][route["id"].get<std::string>()]=fallback;
+    }
     // Two comparison styles share one authoritative topology/revision.
     auto styles=op=="update-routes"?state["styles"]:request.value("styles",state.value("styles",json::object()));
     if(request.contains("style"))styles["right"]=request["style"];
@@ -1569,10 +1607,29 @@ json transitCoreRequest(const json& request) {
     state["styles"]=styles;json scenes=json::object();
     // The browser supplies route-specific styles after receiving topology.
     // Avoid an unused full render with default widths during session creation.
-    if(op=="session"&&request.value("deferRender",false))return {{"state",state},{"shape",topology},{"renderGeometries",scenes},{"obstacles",json::array()},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"spacingScale",1}};
+    if(op=="session"&&request.value("deferRender",false))return {{"megaPresentation",mega::presentation(state)},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"obstacles",json::array()},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"spacingScale",1}};
     Shape renderShape;StyledShape renderCanonical;json renderTopology;
     if(!enabled.empty()) {
-        renderShape=directionalRenderShape(shape,state.at("directionalData"),state["bidirectionalRoutes"]);
+        if(state.value("nativeGeometry",false)||state.value("transitNetworks",json::object()).contains("composite")) {
+            // Authoritative edited geometry, with GTFS visits mapped onto it.
+            if(!state.contains("shapeTraversals"))state["shapeTraversals"]=mapGtfsDirections(shape,state["directionalData"],state["shapeRevision"]);
+            renderShape=shape;renderShape.routes.clear();
+            std::map<std::string,int> nodes,segments;
+            for(size_t i=0;i<shape.nodes.size();++i)nodes[shape.nodes[i].uid]=i;
+            for(size_t i=0;i<shape.segments.size();++i)segments[shape.segments[i].uid]=i;
+            for(const auto& parent:shape.routes) {
+                bool drawn=false;
+                if(enabled.count(parent.id))for(const auto& tr:state["shapeTraversals"]["traversals"])if(tr["routeId"]==parent.id){
+                    auto route=parent;route.logicalRouteId=parent.id;route.patternId=tr["patternId"];route.directionId=tr["directionId"];
+                    route.id="gtfs:"+json::array({parent.id,route.patternId}).dump();
+                    route.segmentIndices.clear();route.orderedNodes.clear();
+                    for(const auto& id:tr["orderedNodes"])route.orderedNodes.push_back(nodes.at(id));
+                    for(const auto& id:tr["orderedSegments"])route.segmentIndices.push_back(segments.at(id));
+                    renderShape.routes.push_back(std::move(route));drawn=true;
+                }
+                if(!drawn)renderShape.routes.push_back(parent);
+            }
+        } else renderShape=directionalRenderShape(shape,state.at("directionalData"),state["bidirectionalRoutes"]);
         renderCanonical=Shape2StyleShape(renderShape);directionalSharedGeometry(renderShape,renderCanonical);
         auto temporary=state;renderTopology=encode(renderShape,cam,renderCanonical,temporary);
         // Public display membership uses the logical parent, never the instance ID.
@@ -1781,5 +1838,5 @@ json transitCoreRequest(const json& request) {
         }
         obstacles.push_back(std::move(obstacle));
     }
-    return {{"routeReplacements",routeReplacements},{"spacingScale",spacingScale},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
+    return {{"megaPresentation",mega::presentation(state)},{"routeReplacements",routeReplacements},{"spacingScale",spacingScale},{"state",state},{"shape",topology},{"renderGeometries",scenes},{"renderGeometry",scenes.begin().value()},{"obstacles",obstacles},{"bidirectionalRoutes",state["bidirectionalRoutes"]},{"directionalRouteIds",available},{"traversalDiagnostics",state.value("shapeTraversals",json::object()).value("diagnostics",json::array())}};
 }
