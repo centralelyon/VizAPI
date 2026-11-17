@@ -165,6 +165,15 @@ def filter_gtfs(input_path, output_path, selected_route_ids):
                                 stop_ids.add(pathway_stop_id)
                                 changed = True
 
+        # Pathways can reach stops outside the selected station complexes.
+        # Keep their parent chain so stops.txt retains valid station references.
+        pending = list(stop_ids)
+        while pending:
+            parent_id = stop_by_id[pending.pop()].get("parent_station")
+            if parent_id and parent_id not in stop_ids:
+                stop_ids.add(parent_id)
+                pending.append(parent_id)
+
         filtered_stops = [
             row for row in stops
             if row.get("stop_id") in stop_ids
